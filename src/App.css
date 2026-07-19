@@ -480,16 +480,16 @@
   color: var(--s1);
 }
 
-/* KMEA quick-pick presets */
-.presets {
+/* satellite layer selector */
+.sat-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem 0.9rem;
-  margin-bottom: 1.6rem;
+  margin-bottom: 0.9rem;
 }
 
-.presets-label {
+.sat-label {
   font-family: var(--font-mono);
   font-size: 0.68rem;
   letter-spacing: 0.12em;
@@ -497,49 +497,149 @@
   color: rgba(167, 220, 232, 0.7);
 }
 
-.preset-chips {
+.sat-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
 }
 
-.preset-chip {
+.sat-chip {
   border: 1px solid rgba(167, 220, 232, 0.28);
   background: rgba(8, 61, 79, 0.5);
   color: #d8eef4;
   border-radius: 999px;
-  padding: 0.32rem 0.75rem;
+  padding: 0.32rem 0.8rem;
   font-size: 0.82rem;
   cursor: pointer;
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
-.preset-chip em {
-  font-style: normal;
-  font-size: 0.66rem;
-  letter-spacing: 0.06em;
-  color: var(--s2);
-  margin-left: 0.35rem;
-}
-
-.preset-chip:hover {
+.sat-chip:hover {
   border-color: var(--s1);
   background: rgba(167, 220, 232, 0.12);
 }
 
-.preset-chip.is-on {
+.sat-chip.is-on {
   background: var(--s2);
   border-color: var(--s2);
   color: #062e3c;
   font-weight: 600;
 }
 
-.preset-chip.is-on em {
-  color: #084355;
+/* the world map */
+.map {
+  height: 460px;
+  width: 100%;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(167, 220, 232, 0.2);
+  background: #05222c;
+  cursor: crosshair;
+  z-index: 0;
 }
 
-.live-note a {
+.map .leaflet-container {
+  background: #05222c;
+}
+
+.sat-legend {
+  margin: 0.8rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: rgba(167, 220, 232, 0.78);
+  max-width: 46rem;
+}
+
+/* readout below the map */
+.readout {
+  margin-top: 1.8rem;
+}
+
+.live-place {
+  margin: 0 0 1.2rem;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  color: #f2fafc;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.6rem;
+}
+
+.live-place-sub {
+  color: var(--s2);
+  font-weight: 400;
+}
+
+.live-coords {
+  color: rgba(167, 220, 232, 0.62);
+  font-size: 0.8rem;
+}
+
+.group-head {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(167, 220, 232, 0.7);
+  margin: 1.6rem 0 0.7rem;
+  font-weight: 500;
+}
+
+.group-head:first-of-type {
+  margin-top: 0;
+}
+
+/* source ledger */
+.sources {
+  margin-top: 2.2rem;
+  padding-top: 1.6rem;
+  border-top: 1px solid rgba(167, 220, 232, 0.18);
+}
+
+.sources h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1rem;
+  margin: 0 0 0.9rem;
+  color: #f2fafc;
+}
+
+.sources ul {
+  list-style: none;
+  margin: 0 0 1.2rem;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.9rem 1.6rem;
+}
+
+.sources li {
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.sources li strong {
+  display: block;
+  color: #dcf0f5;
+  font-weight: 600;
+  margin-bottom: 0.15rem;
+}
+
+.sources li span {
+  color: rgba(167, 220, 232, 0.72);
+}
+
+.sources a {
   color: var(--s1);
+}
+
+.live-sub {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: rgba(167, 220, 232, 0.8);
+  max-width: 30rem;
 }
 
 .live-status {
@@ -899,6 +999,10 @@
   .place-search {
     width: 100%;
     flex-basis: auto;
+  }
+
+  .map {
+    height: 340px;
   }
 
   .metric-value {

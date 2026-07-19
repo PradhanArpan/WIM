@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import './App.css'
 
 // Paste your Apps Script Web App URL here after deployment
@@ -28,52 +30,55 @@ const LAYERS = [
   'Intelligence',
 ]
 
-// Default map point and quick-pick presets. Any location worldwide
-// can be searched; these presets are the eight KMEA study districts
-// (coordinates are district headquarters).
-const DEFAULT_PLACE = {
-  name: 'Bengaluru',
-  region: 'Karnataka',
-  country: 'India',
-  lat: 12.97,
-  lon: 77.59,
+// Opening view: the whole planet. Any point on Earth can be
+// clicked or searched.
+const START = { name: 'Select a point', region: '', country: '', lat: 20, lon: 0 }
+
+// ------------------------------------------------------------
+// NASA GIBS satellite overlays, served over WMS (EPSG:3857).
+// WMS is used rather than WMTS because it handles the time
+// dimension without hardcoded tile-matrix levels.
+// ------------------------------------------------------------
+const GIBS_WMS = 'https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi?'
+
+const SAT_LAYERS = [
+  { id: 'none', label: 'None', layer: null, legend: null },
+  {
+    id: 'truecolor',
+    label: 'True colour',
+    layer: 'MODIS_Terra_CorrectedReflectance_TrueColor',
+    opacity: 1,
+    legend: 'MODIS Terra corrected reflectance — what the satellite sees. Cloud, sediment plumes, snow and flooding are all visible directly.',
+  },
+  {
+    id: 'precip',
+    label: 'Precipitation',
+    layer: 'IMERG_Precipitation_Rate',
+    opacity: 0.75,
+    legend: 'GPM IMERG precipitation rate — half-hourly global rainfall from the satellite constellation. Blue is light, red is intense.',
+  },
+  {
+    id: 'lst',
+    label: 'Land surface temp',
+    layer: 'MODIS_Terra_Land_Surface_Temp_Day',
+    opacity: 0.75,
+    legend: 'MODIS daytime land surface temperature — the skin temperature of the ground, a strong proxy for drought and heat stress.',
+  },
+  {
+    id: 'ndvi',
+    label: 'Vegetation',
+    layer: 'MODIS_Terra_NDVI_8Day',
+    opacity: 0.8,
+    legend: 'MODIS NDVI, 8-day composite — vegetation vigour. Green is dense growth; pale is sparse or stressed cover.',
+  },
+]
+
+// GIBS daily products lag acquisition, so ask for a recent past
+// day rather than today (today is often empty worldwide).
+function gibsDate() {
+  const d = new Date(Date.now() - 3 * 86400000)
+  return d.toISOString().slice(0, 10)
 }
-
-const KMEA_PRESETS = [
-  { name: 'Hassan', tag: 'CNNL', region: 'Karnataka', country: 'India', lat: 13.0, lon: 76.1 },
-  { name: 'Tumakuru', tag: 'CNNL', region: 'Karnataka', country: 'India', lat: 13.34, lon: 77.1 },
-  { name: 'Mandya', tag: 'CNNL', region: 'Karnataka', country: 'India', lat: 12.52, lon: 76.9 },
-  { name: 'Mysuru', tag: 'CNNL', region: 'Karnataka', country: 'India', lat: 12.3, lon: 76.65 },
-  { name: 'Chikkamagaluru', tag: 'VJNL', region: 'Karnataka', country: 'India', lat: 13.32, lon: 75.77 },
-  { name: 'Shivamogga', tag: 'KNNL', region: 'Karnataka', country: 'India', lat: 13.93, lon: 75.57 },
-  { name: 'Haveri', tag: 'KNNL', region: 'Karnataka', country: 'India', lat: 14.79, lon: 75.4 },
-  { name: 'Yadgir', tag: 'KBJNL', region: 'Karnataka', country: 'India', lat: 16.77, lon: 77.14 },
-]
-
-const TIER_GUIDE = [
-  {
-    cls: 'dot-curated',
-    title: 'Curated source',
-    text: 'Standards, official publications and expert-written material, reviewed before it enters the corpus. The strongest tier.',
-  },
-  {
-    cls: 'dot-web',
-    title: 'Web-sourced · human-verified',
-    text: 'Gathered from the open web, then checked and approved by a domain expert before being admitted.',
-  },
-  {
-    cls: 'dot-pending',
-    title: 'Logged for review',
-    text: 'The corpus cannot answer this yet. The question is recorded, reviewed by an expert, and the gap is closed.',
-  },
-]
-
-const LOOP_STEPS = [
-  { title: 'You ask', text: 'Any water question, in English, Hindi or Kannada.' },
-  { title: 'Corpus search', text: 'Keyword and cross-language semantic search over curated documents.' },
-  { title: 'Grounded answer', text: 'Composed only from retrieved passages, never invented, always labelled by tier.' },
-  { title: 'Gaps close', text: 'Unanswered questions are logged, expert-reviewed, and folded back into the corpus.' },
-]
 
 function StrataMark({ size = 22 }) {
   return (
@@ -96,56 +101,87 @@ function StrataMark({ size = 22 }) {
   )
 }
 
+function fmt(v, digits = 1) {
+  if (v === null || v === undefined || Number.isNaN(v)) return '—'
+  return Number(v).toFixed(digits)
+}
+
 // ------------------------------------------------------------
-// Live conditions — fetched directly from Open-Meteo in the
-// browser (free, no key, CORS-enabled). No backend involved.
+// All observation data for one point on Earth. Every source is
+// free, keyless and CORS-enabled, so it runs entirely in the
+// browser with no backend involved.
 // ------------------------------------------------------------
-function useLiveConditions(place) {
-  const [data, setData] = useState(null)
-  const [state, setState] = useState('loading') // loading | ok | error
+function useObservations(place) {
+  const [d, setD] = useState(null)
+  const [state, setState] = useState('idle') // idle | loading | ok | error
   const reqId = useRef(0)
 
   useEffect(() => {
+    if (place.lat === null) return
     const id = ++reqId.current
     setState('loading')
 
-    const wx =
-      'https://api.open-meteo.com/v1/forecast' +
-      `?latitude=${place.lat}&longitude=${place.lon}` +
-      '&daily=precipitation_sum,temperature_2m_max,temperature_2m_min,et0_fao_evapotranspiration' +
-      '&hourly=soil_moisture_3_to_9cm' +
-      '&past_days=7&forecast_days=7&timezone=auto'
-    const fl =
-      'https://flood-api.open-meteo.com/v1/flood' +
-      `?latitude=${place.lat}&longitude=${place.lon}` +
-      '&daily=river_discharge,river_discharge_max&past_days=7&forecast_days=30'
+    const j = (u) => fetch(u).then((r) => r.json()).catch(() => null)
+    const { lat, lon } = place
 
-    Promise.all([
-      fetch(wx).then((r) => r.json()),
-      fetch(fl).then((r) => r.json()).catch(() => null),
-    ])
-      .then(([w, f]) => {
-        if (id !== reqId.current) return // stale — a newer place was picked
-        if (!w || !w.daily) throw new Error('no data')
-        const sm = (w.hourly?.soil_moisture_3_to_9cm || []).filter(
-          (v) => v !== null
-        )
+    const weather = j(
+      'https://api.open-meteo.com/v1/forecast' +
+        `?latitude=${lat}&longitude=${lon}` +
+        '&daily=precipitation_sum,temperature_2m_max,temperature_2m_min,et0_fao_evapotranspiration' +
+        '&hourly=soil_moisture_3_to_9cm' +
+        '&past_days=7&forecast_days=7&timezone=auto'
+    )
+    const flood = j(
+      'https://flood-api.open-meteo.com/v1/flood' +
+        `?latitude=${lat}&longitude=${lon}` +
+        '&daily=river_discharge,river_discharge_max&past_days=7&forecast_days=30'
+    )
+    const air = j(
+      'https://air-quality-api.open-meteo.com/v1/air-quality' +
+        `?latitude=${lat}&longitude=${lon}&hourly=pm2_5,pm10&forecast_days=1`
+    )
+    const elev = j(
+      `https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lon}`
+    )
+    const climate = j(
+      'https://climate-api.open-meteo.com/v1/climate' +
+        `?latitude=${lat}&longitude=${lon}` +
+        '&start_date=2045-01-01&end_date=2045-12-31' +
+        '&models=MRI_AGCM3_2_S&daily=temperature_2m_max,precipitation_sum'
+    )
+
+    Promise.all([weather, flood, air, elev, climate])
+      .then(([w, f, a, e, c]) => {
+        if (id !== reqId.current) return
+        if (!w || !w.daily) throw new Error('no weather')
+
         const rain = w.daily.precipitation_sum.map((v) => v ?? 0)
-        const fMax = f?.daily?.river_discharge_max
-          ? f.daily.river_discharge_max.slice(7).filter((v) => v !== null)
-          : []
-        setData({
+        const sm = (w.hourly?.soil_moisture_3_to_9cm || []).filter((v) => v !== null)
+        const pm25 = (a?.hourly?.pm2_5 || []).filter((v) => v !== null)
+        const pm10 = (a?.hourly?.pm10 || []).filter((v) => v !== null)
+        const fMax = (f?.daily?.river_discharge_max || [])
+          .slice(7)
+          .filter((v) => v !== null)
+        const ct = (c?.daily?.temperature_2m_max || []).filter((v) => v !== null)
+        const cp = (c?.daily?.precipitation_sum || []).filter((v) => v !== null)
+
+        setD({
           dates: w.daily.time,
           rain,
           rainToday: rain[7] ?? 0,
-          rainNext7: rain.slice(7).reduce((a, b) => a + b, 0),
-          rainPast7: rain.slice(0, 7).reduce((a, b) => a + b, 0),
+          rainNext7: rain.slice(7).reduce((x, y) => x + y, 0),
+          rainPast7: rain.slice(0, 7).reduce((x, y) => x + y, 0),
           tmax: w.daily.temperature_2m_max[7],
           tmin: w.daily.temperature_2m_min[7],
           et0: w.daily.et0_fao_evapotranspiration[7],
           soil: sm.length ? sm[sm.length - 1] : null,
           discharge: f?.daily?.river_discharge?.[7] ?? null,
           discharge30Max: fMax.length ? Math.max(...fMax) : null,
+          pm25: pm25.length ? pm25[pm25.length - 1] : null,
+          pm10: pm10.length ? pm10[pm10.length - 1] : null,
+          elevation: e?.elevation?.[0] ?? null,
+          projTmax: ct.length ? ct.reduce((x, y) => x + y, 0) / ct.length : null,
+          projPrecip: cp.length ? cp.reduce((x, y) => x + y, 0) : null,
         })
         setState('ok')
       })
@@ -154,78 +190,11 @@ function useLiveConditions(place) {
       })
   }, [place])
 
-  return { data, state }
-}
-
-function fmt(v, digits = 1) {
-  if (v === null || v === undefined || Number.isNaN(v)) return '—'
-  return Number(v).toFixed(digits)
-}
-
-function RainChart({ dates, rain, past7, next7 }) {
-  const max = Math.max(1, ...rain)
-  const W = 560
-  const H = 110
-  const gap = 6
-  const bw = (W - gap * (rain.length - 1)) / rain.length
-  return (
-    <div className="rain-chart-wrap">
-      <svg
-        className="rain-chart"
-        viewBox={`0 0 ${W} ${H + 22}`}
-        role="img"
-        aria-label="Daily rainfall in millimetres: past seven days and seven-day forecast"
-      >
-        {rain.map((v, i) => {
-          const h = Math.max(2, (v / max) * H)
-          const x = i * (bw + gap)
-          const d = new Date(dates[i] + 'T00:00:00')
-          return (
-            <g key={dates[i]}>
-              <rect
-                x={x}
-                y={H - h}
-                width={bw}
-                height={h}
-                rx="2.5"
-                className={i < 7 ? 'bar-past' : 'bar-fcst'}
-              >
-                <title>{`${dates[i]}: ${fmt(v)} mm`}</title>
-              </rect>
-              <text
-                x={x + bw / 2}
-                y={H + 15}
-                className="bar-label"
-                textAnchor="middle"
-              >
-                {d.getDate()}
-              </text>
-            </g>
-          )
-        })}
-        <line
-          x1={7 * (bw + gap) - gap / 2}
-          y1="0"
-          x2={7 * (bw + gap) - gap / 2}
-          y2={H}
-          className="today-line"
-        />
-      </svg>
-      <div className="rain-legend">
-        <span>
-          <i className="swatch swatch-past" /> Past 7 days · {fmt(past7, 0)} mm
-        </span>
-        <span>
-          <i className="swatch swatch-fcst" /> Forecast 7 days · {fmt(next7, 0)} mm
-        </span>
-      </div>
-    </div>
-  )
+  return { d, state }
 }
 
 // ------------------------------------------------------------
-// Location search — Open-Meteo geocoding (free, no key,
-// worldwide). Debounced; keyboard accessible.
+// Location search — Open-Meteo geocoding (free, no key, global)
 // ------------------------------------------------------------
 function PlaceSearch({ onPick }) {
   const [term, setTerm] = useState('')
@@ -252,9 +221,9 @@ function PlaceSearch({ onPick }) {
           '&count=6&language=en&format=json'
       )
         .then((r) => r.json())
-        .then((d) => {
+        .then((data) => {
           if (id !== reqId.current) return
-          setHits(d.results || [])
+          setHits(data.results || [])
           setOpen(true)
           setCursor(-1)
         })
@@ -271,7 +240,6 @@ function PlaceSearch({ onPick }) {
     return () => clearTimeout(t)
   }, [term])
 
-  // close on outside click
   useEffect(() => {
     function onDoc(e) {
       if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false)
@@ -314,7 +282,7 @@ function PlaceSearch({ onPick }) {
       <input
         type="text"
         value={term}
-        placeholder="Search any town, district or city…"
+        placeholder="Search anywhere on Earth…"
         aria-label="Search for a location"
         autoComplete="off"
         onChange={(e) => setTerm(e.target.value)}
@@ -325,7 +293,7 @@ function PlaceSearch({ onPick }) {
         <ul className="place-results" role="listbox">
           {busy && <li className="place-msg">Searching…</li>}
           {!busy && !hits.length && (
-            <li className="place-msg">No matching place. Try a different spelling.</li>
+            <li className="place-msg">No matching place. Try another spelling.</li>
           )}
           {!busy &&
             hits.map((h, i) => (
@@ -337,9 +305,7 @@ function PlaceSearch({ onPick }) {
                   onClick={() => choose(h)}
                 >
                   <strong>{h.name}</strong>
-                  <span>
-                    {[h.admin1, h.country].filter(Boolean).join(' · ')}
-                  </span>
+                  <span>{[h.admin1, h.country].filter(Boolean).join(' · ')}</span>
                 </button>
               </li>
             ))}
@@ -349,11 +315,152 @@ function PlaceSearch({ onPick }) {
   )
 }
 
-function LiveConditions() {
-  const [place, setPlace] = useState(DEFAULT_PLACE)
-  const { data, state } = useLiveConditions(place)
+// ------------------------------------------------------------
+// The world map. Click any point to read it.
+// ------------------------------------------------------------
+function WorldMap({ place, onPick, satId }) {
+  const elRef = useRef(null)
+  const mapRef = useRef(null)
+  const markerRef = useRef(null)
+  const overlayRef = useRef(null)
 
+  // create once
+  useEffect(() => {
+    if (mapRef.current || !elRef.current) return
+    const map = L.map(elRef.current, {
+      center: [20, 0],
+      zoom: 2,
+      minZoom: 2,
+      worldCopyJump: true,
+      attributionControl: false,
+    })
+    L.tileLayer(
+      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      { subdomains: 'abcd', maxZoom: 19 }
+    ).addTo(map)
+
+    map.on('click', (e) => {
+      const { lat, lng } = e.latlng
+      onPick({
+        name: 'Dropped pin',
+        region: '',
+        country: '',
+        lat: +lat.toFixed(4),
+        lon: +(((lng + 540) % 360) - 180).toFixed(4),
+        pin: true,
+      })
+    })
+    mapRef.current = map
+    // size correctly once laid out
+    setTimeout(() => map.invalidateSize(), 0)
+  }, [onPick])
+
+  // satellite overlay
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    if (overlayRef.current) {
+      map.removeLayer(overlayRef.current)
+      overlayRef.current = null
+    }
+    const cfg = SAT_LAYERS.find((s) => s.id === satId)
+    if (!cfg || !cfg.layer) return
+    const wms = L.tileLayer.wms(GIBS_WMS, {
+      layers: cfg.layer,
+      format: 'image/png',
+      transparent: true,
+      version: '1.3.0',
+      time: gibsDate(),
+      opacity: cfg.opacity ?? 0.8,
+      crossOrigin: true,
+    })
+    wms.addTo(map)
+    overlayRef.current = wms
+  }, [satId])
+
+  // marker follows the selected place
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || place.lat === null) return
+    if (markerRef.current) map.removeLayer(markerRef.current)
+    const m = L.circleMarker([place.lat, place.lon], {
+      radius: 7,
+      color: '#f2fafc',
+      weight: 2,
+      fillColor: '#6fbfd4',
+      fillOpacity: 0.95,
+    }).addTo(map)
+    markerRef.current = m
+    if (!place.pin) map.flyTo([place.lat, place.lon], Math.max(map.getZoom(), 7), { duration: 0.8 })
+  }, [place])
+
+  return <div className="map" ref={elRef} role="application" aria-label="World map. Click a point to read conditions there." />
+}
+
+function RainChart({ dates, rain, past7, next7 }) {
+  const max = Math.max(1, ...rain)
+  const W = 560
+  const H = 110
+  const gap = 6
+  const bw = (W - gap * (rain.length - 1)) / rain.length
+  return (
+    <div className="rain-chart-wrap">
+      <svg
+        className="rain-chart"
+        viewBox={`0 0 ${W} ${H + 22}`}
+        role="img"
+        aria-label="Daily rainfall in millimetres: past seven days and seven-day forecast"
+      >
+        {rain.map((v, i) => {
+          const h = Math.max(2, (v / max) * H)
+          const x = i * (bw + gap)
+          const dt = new Date(dates[i] + 'T00:00:00')
+          return (
+            <g key={dates[i]}>
+              <rect
+                x={x}
+                y={H - h}
+                width={bw}
+                height={h}
+                rx="2.5"
+                className={i < 7 ? 'bar-past' : 'bar-fcst'}
+              >
+                <title>{`${dates[i]}: ${fmt(v)} mm`}</title>
+              </rect>
+              <text x={x + bw / 2} y={H + 15} className="bar-label" textAnchor="middle">
+                {dt.getDate()}
+              </text>
+            </g>
+          )
+        })}
+        <line
+          x1={7 * (bw + gap) - gap / 2}
+          y1="0"
+          x2={7 * (bw + gap) - gap / 2}
+          y2={H}
+          className="today-line"
+        />
+      </svg>
+      <div className="rain-legend">
+        <span>
+          <i className="swatch swatch-past" /> Past 7 days · {fmt(past7, 0)} mm
+        </span>
+        <span>
+          <i className="swatch swatch-fcst" /> Next 7 days · {fmt(next7, 0)} mm
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function Observatory() {
+  const [place, setPlace] = useState(START)
+  const [satId, setSatId] = useState('truecolor')
+  const { d, state } = useObservations(place)
+
+  const sat = SAT_LAYERS.find((s) => s.id === satId)
   const where = [place.region, place.country].filter(Boolean).join(' · ')
+  const chosen = place.lat !== null && place !== START
 
   return (
     <section id="live" className="live">
@@ -361,116 +468,201 @@ function LiveConditions() {
         <div className="live-head">
           <div>
             <p className="eyebrow eyebrow-light">Observation layer · live</p>
-            <h2>Water conditions now</h2>
-            <p className="live-place">
-              {place.name}
-              {place.tag ? ` (${place.tag})` : ''}
-              {where && <span className="live-place-sub"> · {where}</span>}
+            <h2>The water observatory</h2>
+            <p className="live-sub">
+              Click anywhere on Earth, or search a place, to read current
+              conditions from open satellite and model data.
             </p>
           </div>
           <PlaceSearch onPick={setPlace} />
         </div>
 
-        <div className="presets">
-          <span className="presets-label">KMEA study districts</span>
-          <div className="preset-chips">
-            {KMEA_PRESETS.map((d) => (
+        <div className="sat-bar">
+          <span className="sat-label">Satellite layer</span>
+          <div className="sat-chips">
+            {SAT_LAYERS.map((s) => (
               <button
-                key={d.name}
-                className={`preset-chip${place.name === d.name ? ' is-on' : ''}`}
-                onClick={() => setPlace(d)}
+                key={s.id}
+                className={`sat-chip${satId === s.id ? ' is-on' : ''}`}
+                onClick={() => setSatId(s.id)}
               >
-                {d.name}
-                <em>{d.tag}</em>
+                {s.label}
               </button>
             ))}
           </div>
         </div>
 
-        {state === 'loading' && (
-          <p className="live-status">Reading current conditions…</p>
-        )}
-        {state === 'error' && (
-          <p className="live-status">
-            Live data is unavailable for this location right now. Search
-            again or retry in a moment.
+        <WorldMap place={place} onPick={setPlace} satId={satId} />
+
+        {sat && sat.legend && <p className="sat-legend">{sat.legend}</p>}
+
+        <div className="readout">
+          <p className="live-place">
+            {chosen ? (
+              <>
+                {place.name}
+                {where && <span className="live-place-sub"> · {where}</span>}
+                <span className="live-coords">
+                  {fmt(place.lat, 3)}°, {fmt(place.lon, 3)}°
+                </span>
+              </>
+            ) : (
+              <span className="live-place-sub">
+                No point selected yet — click the map or search above.
+              </span>
+            )}
           </p>
-        )}
 
-        {state === 'ok' && data && (
-          <>
-            <div className="metrics" aria-live="polite">
-              <div className="metric">
-                <span className="metric-value">
-                  {fmt(data.rainToday)}
-                  <em>mm</em>
-                </span>
-                <span className="metric-label">Rain today</span>
-              </div>
-              <div className="metric">
-                <span className="metric-value">
-                  {fmt(data.rainNext7, 0)}
-                  <em>mm</em>
-                </span>
-                <span className="metric-label">Next 7 days</span>
-              </div>
-              <div className="metric">
-                <span className="metric-value">
-                  {data.soil !== null ? fmt(data.soil, 2) : '—'}
-                  <em>m³/m³</em>
-                </span>
-                <span className="metric-label">Soil moisture</span>
-              </div>
-              <div className="metric">
-                <span className="metric-value">
-                  {fmt(data.et0)}
-                  <em>mm</em>
-                </span>
-                <span className="metric-label">Evapotranspiration ET₀</span>
-              </div>
-              <div className="metric">
-                <span className="metric-value">
-                  {fmt(data.tmax, 0)}°
-                  <span className="metric-sub"> / {fmt(data.tmin, 0)}°</span>
-                </span>
-                <span className="metric-label">Max / min today</span>
-              </div>
-              <div className="metric">
-                <span className="metric-value">
-                  {fmt(data.discharge, 2)}
-                  <em>m³/s</em>
-                </span>
-                <span className="metric-label">
-                  River discharge
-                  {data.discharge30Max !== null
-                    ? ` · 30-day max ${fmt(data.discharge30Max, 1)}`
-                    : ''}
-                </span>
-              </div>
-            </div>
+          {chosen && state === 'loading' && (
+            <p className="live-status">Reading conditions at this point…</p>
+          )}
+          {chosen && state === 'error' && (
+            <p className="live-status">
+              Data is unavailable for this point right now. Try another point
+              or retry in a moment.
+            </p>
+          )}
 
-            <RainChart
-              dates={data.dates}
-              rain={data.rain}
-              past7={data.rainPast7}
-              next7={data.rainNext7}
-            />
-          </>
-        )}
+          {chosen && state === 'ok' && d && (
+            <>
+              <h3 className="group-head">Rainfall and water balance</h3>
+              <div className="metrics">
+                <div className="metric">
+                  <span className="metric-value">{fmt(d.rainToday)}<em>mm</em></span>
+                  <span className="metric-label">Rain today</span>
+                </div>
+                <div className="metric">
+                  <span className="metric-value">{fmt(d.rainNext7, 0)}<em>mm</em></span>
+                  <span className="metric-label">Next 7 days</span>
+                </div>
+                <div className="metric">
+                  <span className="metric-value">
+                    {d.soil !== null ? fmt(d.soil, 2) : '—'}<em>m³/m³</em>
+                  </span>
+                  <span className="metric-label">Soil moisture 3–9 cm</span>
+                </div>
+                <div className="metric">
+                  <span className="metric-value">{fmt(d.et0)}<em>mm</em></span>
+                  <span className="metric-label">Evapotranspiration ET₀</span>
+                </div>
+              </div>
 
-        <p className="live-note">
-          Weather and location search by{' '}
-          <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">
-            Open-Meteo.com
-          </a>{' '}
-          (CC-BY 4.0) · river discharge from the Copernicus GloFAS model.
-          Model output for orientation, not an official warning — for
-          decisions, consult IMD, CWC and KSNDMC advisories.
-        </p>
+              <RainChart
+                dates={d.dates}
+                rain={d.rain}
+                past7={d.rainPast7}
+                next7={d.rainNext7}
+              />
+
+              <h3 className="group-head">Rivers and terrain</h3>
+              <div className="metrics">
+                <div className="metric">
+                  <span className="metric-value">{fmt(d.discharge, 2)}<em>m³/s</em></span>
+                  <span className="metric-label">River discharge today</span>
+                </div>
+                <div className="metric">
+                  <span className="metric-value">{fmt(d.discharge30Max, 1)}<em>m³/s</em></span>
+                  <span className="metric-label">30-day forecast peak</span>
+                </div>
+                <div className="metric">
+                  <span className="metric-value">{fmt(d.elevation, 0)}<em>m</em></span>
+                  <span className="metric-label">Elevation</span>
+                </div>
+                <div className="metric">
+                  <span className="metric-value">
+                    {fmt(d.tmax, 0)}°<span className="metric-sub"> / {fmt(d.tmin, 0)}°</span>
+                  </span>
+                  <span className="metric-label">Max / min today</span>
+                </div>
+              </div>
+
+              <h3 className="group-head">Air and climate outlook</h3>
+              <div className="metrics">
+                <div className="metric">
+                  <span className="metric-value">{fmt(d.pm25, 0)}<em>µg/m³</em></span>
+                  <span className="metric-label">PM2.5 now</span>
+                </div>
+                <div className="metric">
+                  <span className="metric-value">{fmt(d.pm10, 0)}<em>µg/m³</em></span>
+                  <span className="metric-label">PM10 now</span>
+                </div>
+                <div className="metric">
+                  <span className="metric-value">{fmt(d.projTmax, 1)}°<em>C</em></span>
+                  <span className="metric-label">Mean daily max, 2045 (CMIP6)</span>
+                </div>
+                <div className="metric">
+                  <span className="metric-value">{fmt(d.projPrecip, 0)}<em>mm</em></span>
+                  <span className="metric-label">Annual rainfall, 2045 (CMIP6)</span>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="sources">
+          <h3>Where this comes from</h3>
+          <ul>
+            <li>
+              <strong>Weather, ET₀, soil moisture, elevation, climate projections</strong>
+              <span>
+                <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a>{' '}
+                — forecast, air-quality, elevation and CMIP6 climate APIs (CC-BY 4.0)
+              </span>
+            </li>
+            <li>
+              <strong>River discharge</strong>
+              <span>Copernicus GloFAS global flood model, via the Open-Meteo Flood API</span>
+            </li>
+            <li>
+              <strong>Satellite imagery</strong>
+              <span>
+                NASA{' '}
+                <a href="https://worldview.earthdata.nasa.gov/" target="_blank" rel="noreferrer">GIBS / Worldview</a>{' '}
+                — MODIS Terra, GPM IMERG (EOSDIS)
+              </span>
+            </li>
+            <li>
+              <strong>Place search and base map</strong>
+              <span>Open-Meteo geocoding · © OpenStreetMap contributors, © CARTO</span>
+            </li>
+          </ul>
+          <p className="live-note">
+            These are global model and satellite products, shown for
+            orientation and education. They are not official warnings, and
+            they are coarse at local scale. For any decision, use the
+            responsible national meteorological, hydrological or disaster
+            management agency for the location in question.
+          </p>
+        </div>
       </div>
     </section>
   )
 }
+
+const TIER_GUIDE = [
+  {
+    cls: 'dot-curated',
+    title: 'Curated source',
+    text: 'Standards, official publications and expert-written material, reviewed before it enters the corpus. The strongest tier.',
+  },
+  {
+    cls: 'dot-web',
+    title: 'Web-sourced · human-verified',
+    text: 'Gathered from the open web, then checked and approved by a domain expert before being admitted.',
+  },
+  {
+    cls: 'dot-pending',
+    title: 'Logged for review',
+    text: 'The corpus cannot answer this yet. The question is recorded, reviewed by an expert, and the gap is closed.',
+  },
+]
+
+const LOOP_STEPS = [
+  { title: 'You ask', text: 'Any water question, in English, Hindi or Kannada.' },
+  { title: 'Corpus search', text: 'Keyword and cross-language semantic search over curated documents.' },
+  { title: 'Grounded answer', text: 'Composed only from retrieved passages, never invented, always labelled by tier.' },
+  { title: 'Gaps close', text: 'Unanswered questions are logged, expert-reviewed, and folded back into the corpus.' },
+]
 
 function App() {
   const [question, setQuestion] = useState('')
@@ -517,12 +709,8 @@ function App() {
             <span className="brand-name">WIM-Assistant</span>
           </span>
           <span className="topbar-links">
-            <a className="topbar-link" href="#live">
-              Live conditions
-            </a>
-            <a className="topbar-link" href="#about">
-              About WIM
-            </a>
+            <a className="topbar-link" href="#live">Observatory</a>
+            <a className="topbar-link" href="#about">About WIM</a>
           </span>
         </div>
       </nav>
@@ -605,7 +793,7 @@ function App() {
         </section>
       </main>
 
-      <LiveConditions />
+      <Observatory />
 
       <section className="grading">
         <div className="grading-inner">
@@ -671,7 +859,6 @@ function App() {
           A Water Intelligence Modeling initiative · Answers are generated from
           a curated corpus and labelled by source tier. Policy and legal
           content should always be verified against current official sources.
-          Live conditions: weather data by Open-Meteo.com.
         </p>
       </footer>
     </>
