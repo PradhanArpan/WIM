@@ -1,7 +1,10 @@
 /* ============================================================
    WIM-Assistant — interface styles
    Identity: the strata mark (WIM's seven layers, surface→depth)
-   Display: Space Grotesk · Body: Noto Sans · Labels: IBM Plex Mono
+   Display: Space Grotesk · Body: Noto Sans · Data: IBM Plex Mono
+   Signature: the live "Observation layer" band — conditions
+   rendered inside the water column itself (deep panel, strata
+   blues, mono numerals).
    ============================================================ */
 
 /* ---------- top bar ---------- */
@@ -15,7 +18,7 @@
 }
 
 .topbar-inner {
-  max-width: 860px;
+  max-width: 960px;
   margin: 0 auto;
   padding: 0.7rem 1.25rem;
   display: flex;
@@ -42,6 +45,11 @@
   flex-shrink: 0;
 }
 
+.topbar-links {
+  display: inline-flex;
+  gap: 1.2rem;
+}
+
 .topbar-link {
   font-size: 0.85rem;
   font-weight: 600;
@@ -51,6 +59,30 @@
 
 .topbar-link:hover {
   color: var(--brand);
+}
+
+/* ---------- shared section heads ---------- */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--brand);
+  margin: 0 0 1rem;
+}
+
+.eyebrow-light {
+  color: var(--s2);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 /* ---------- hero ---------- */
@@ -65,16 +97,6 @@
 .hero {
   padding: 3.5rem 0 1.5rem;
   text-align: center;
-}
-
-.eyebrow {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--brand);
-  margin: 0 0 1rem;
 }
 
 .hero h1 {
@@ -324,14 +346,314 @@
   font-size: 0.95rem;
 }
 
-/* ---------- about section ---------- */
-.about {
+/* ============================================================
+   LIVE CONDITIONS — the observation layer band (signature)
+   ============================================================ */
+.live {
+  background: linear-gradient(180deg, #0a4658 0%, #062e3c 100%);
+  border-top: 1px solid var(--hairline);
+}
+
+.live-inner {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 2.2rem;
+  color: #e8f4f7;
+}
+
+.live-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  margin-bottom: 1.8rem;
+}
+
+.live h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.4rem, 3.4vw, 1.9rem);
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: #f2fafc;
+}
+
+.district-select select {
+  appearance: none;
+  border: 1px solid rgba(167, 220, 232, 0.35);
+  background: rgba(8, 61, 79, 0.6);
+  color: #e8f4f7;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.92rem;
+  border-radius: 10px;
+  padding: 0.55rem 2.2rem 0.55rem 0.9rem;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23A7DCE8' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.8rem center;
+}
+
+.district-select select:hover {
+  border-color: var(--s2);
+}
+
+.live-status {
+  margin: 0 0 1rem;
+  color: var(--s1);
+  font-size: 0.92rem;
+}
+
+/* metric grid */
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  background: rgba(167, 220, 232, 0.16);
+  border: 1px solid rgba(167, 220, 232, 0.16);
+  border-radius: 14px;
+  overflow: hidden;
+  margin-bottom: 1.6rem;
+}
+
+.metric {
+  background: rgba(6, 46, 60, 0.85);
+  padding: 1.05rem 1.1rem 0.95rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.metric-value {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 1.45rem;
+  line-height: 1;
+  color: #f2fafc;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-value em {
+  font-style: normal;
+  font-size: 0.72rem;
+  margin-left: 0.28rem;
+  color: var(--s2);
+  letter-spacing: 0.04em;
+}
+
+.metric-sub {
+  font-size: 0.95rem;
+  color: var(--s2);
+}
+
+.metric-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--s1);
+}
+
+/* rain chart */
+.rain-chart-wrap {
+  border: 1px solid rgba(167, 220, 232, 0.16);
+  border-radius: 14px;
+  padding: 1.1rem 1.2rem 0.9rem;
+  background: rgba(6, 46, 60, 0.55);
+}
+
+.rain-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.bar-past {
+  fill: rgba(111, 191, 212, 0.34);
+}
+
+.bar-fcst {
+  fill: var(--s2);
+}
+
+.bar-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  fill: rgba(167, 220, 232, 0.6);
+}
+
+.today-line {
+  stroke: rgba(242, 250, 252, 0.4);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+
+.rain-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.6rem;
+  margin-top: 0.7rem;
+  font-size: 0.78rem;
+  color: var(--s1);
+}
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-right: 0.4rem;
+  vertical-align: -1px;
+}
+
+.swatch-past {
+  background: rgba(111, 191, 212, 0.34);
+}
+
+.swatch-fcst {
+  background: var(--s2);
+}
+
+.live-note {
+  margin: 1.4rem 0 0;
+  font-size: 0.76rem;
+  line-height: 1.6;
+  color: rgba(167, 220, 232, 0.62);
+  max-width: 46rem;
+}
+
+/* ============================================================
+   PROVENANCE — how answers are graded
+   ============================================================ */
+.grading {
+  border-top: 1px solid var(--hairline);
+  background: var(--paper);
+}
+
+.grading-inner,
+.loop-inner {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 3rem 1.25rem;
+}
+
+.grading h2,
+.loop h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(1.35rem, 3.2vw, 1.7rem);
+  letter-spacing: -0.02em;
+  margin: 0 0 1.6rem;
+  color: var(--brand-deep);
+}
+
+.tier-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 1rem;
+}
+
+.tier-card {
+  background: var(--card);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  padding: 1.2rem 1.3rem;
+}
+
+.tier-dot {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-bottom: 0.7rem;
+}
+
+.dot-curated { background: var(--tier-curated); }
+.dot-web { background: var(--tier-web); }
+.dot-pending { background: var(--tier-pending); }
+
+.tier-card h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.98rem;
+  margin: 0 0 0.4rem;
+  color: var(--ink);
+}
+
+.tier-card p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+
+.gov-note {
+  margin: 1.3rem 0 0;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--gov-line);
+  background: var(--gov-wash);
+  border-radius: 12px;
+  color: var(--gov-ink);
+  font-size: 0.87rem;
+  max-width: 46rem;
+}
+
+/* ============================================================
+   LEARNING LOOP
+   ============================================================ */
+.loop {
   border-top: 1px solid var(--hairline);
   background: var(--card);
 }
 
+.loop-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.4rem;
+  counter-reset: step;
+}
+
+.loop-steps li {
+  counter-increment: step;
+  border-top: 3px solid var(--brand-wash);
+  padding-top: 0.9rem;
+  position: relative;
+}
+
+.loop-steps li::before {
+  content: '0' counter(step);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  color: var(--brand);
+}
+
+.loop-steps h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.98rem;
+  margin: 0.35rem 0 0.35rem;
+  color: var(--ink);
+}
+
+.loop-steps p {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+
+/* ---------- about section ---------- */
+.about {
+  border-top: 1px solid var(--hairline);
+  background: var(--paper);
+}
+
 .about-inner {
-  max-width: 860px;
+  max-width: 960px;
   margin: 0 auto;
   padding: 3rem 1.25rem;
 }
@@ -394,6 +716,7 @@
 .footer {
   border-top: 1px solid var(--hairline);
   padding: 1.4rem 1.25rem 2rem;
+  background: var(--paper);
 }
 
 .footer p {
@@ -423,5 +746,22 @@
   .chips {
     justify-content: flex-start;
     text-align: left;
+  }
+
+  .live-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .district-select select {
+    width: 100%;
+  }
+
+  .metric-value {
+    font-size: 1.25rem;
+  }
+
+  .bar-label {
+    font-size: 13px;
   }
 }
