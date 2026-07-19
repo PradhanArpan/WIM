@@ -21,7 +21,7 @@
 /* ---------- top bar + tabs ---------- */
 .topbar {
   border-bottom: 1px solid var(--hairline);
-  background: rgba(244, 248, 248, 0.94);
+  background: rgba(246, 249, 250, 0.88);
   backdrop-filter: blur(6px);
   position: sticky;
   top: 0;
@@ -99,12 +99,14 @@
 
 /* ---------- panes ---------- */
 .pane-light {
-  background: var(--paper);
+  background: transparent;
 }
 
 .pane-dark {
-  background: linear-gradient(180deg, #0a4658 0%, #062e3c 100%);
-  color: #e8f4f7;
+  background:
+    radial-gradient(900px 420px at 12% -8%, rgba(111, 191, 212, 0.16), transparent 60%),
+    linear-gradient(180deg, var(--deep-a) 0%, var(--deep-b) 100%);
+  color: var(--deep-ink);
 }
 
 .pane-inner {
@@ -208,6 +210,84 @@
 .ask-btn:disabled {
   opacity: 0.65;
   cursor: default;
+}
+
+.mic-btn {
+  flex-shrink: 0;
+  width: 2.7rem;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--brand-wash);
+  color: var(--brand-deep);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.mic-btn:hover {
+  background: var(--brand);
+  color: #fff;
+}
+
+.mic-btn.is-listening {
+  background: var(--brand);
+  color: #fff;
+  animation: mic-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(11, 107, 133, 0.35); }
+  50% { box-shadow: 0 0 0 7px rgba(11, 107, 133, 0); }
+}
+
+.voice-row {
+  margin: 0.8rem auto 0;
+  max-width: 40rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.voice-label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.voice-langs {
+  display: inline-flex;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--card);
+  padding: 0.14rem;
+  gap: 0.14rem;
+}
+
+.voice-lang {
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  padding: 0.28rem 0.75rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.voice-lang:hover {
+  color: var(--brand-deep);
+}
+
+.voice-lang.is-on {
+  background: var(--brand);
+  color: #fff;
+  font-weight: 600;
 }
 
 .chips {
@@ -652,6 +732,24 @@
   animation: strata-pulse 1.2s ease-in-out infinite;
 }
 
+.ask-about {
+  border: 1px solid rgba(167, 220, 232, 0.35);
+  background: transparent;
+  color: var(--s1);
+  border-radius: 999px;
+  padding: 0.28rem 0.8rem;
+  font-size: 0.78rem;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.ask-about:hover {
+  background: var(--s2);
+  border-color: var(--s2);
+  color: #052732;
+}
+
 .live-status {
   margin: 0 0 1rem;
   color: var(--s1);
@@ -684,11 +782,16 @@
 }
 
 .metric {
-  background: rgba(6, 46, 60, 0.85);
+  background: var(--deep-card);
   padding: 1.05rem 1.1rem 0.95rem;
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  transition: background-color 0.15s ease;
+}
+
+.metric:hover {
+  background: rgba(11, 62, 78, 0.92);
 }
 
 .metric-value {
@@ -798,6 +901,7 @@
 }
 
 .feed {
+  border-radius: 10px;
   display: grid;
   grid-template-columns: auto 1fr;
   grid-template-rows: auto auto;
@@ -1029,7 +1133,7 @@
 .footer {
   border-top: 1px solid var(--hairline);
   padding: 1.1rem 1.25rem 1.4rem;
-  background: var(--paper);
+  background: transparent;
 }
 
 .footer p {

@@ -193,6 +193,12 @@ const EXAMPLES = [
   'ಕುಡಿಯುವ ನೀರಿನ ಗುಣಮಟ್ಟ ಎಂದರೇನು?',
 ]
 
+const VOICE_LANGS = [
+  { code: 'en-IN', label: 'EN' },
+  { code: 'hi-IN', label: 'हिं' },
+  { code: 'kn-IN', label: 'ಕನ್ನಡ' },
+]
+
 const WIM_LAYERS = [
   'Physical systems',
   'Observation',
@@ -602,7 +608,7 @@ function RainChart({ dates, rain, past7, next7 }) {
 // ------------------------------------------------------------
 // Observatory tab
 // ------------------------------------------------------------
-function Observatory({ visible }) {
+function Observatory({ visible, onAskAbout }) {
   const [place, setPlace] = useState(null)
   const [satId, setSatId] = useState('truecolor')
   const [satDate, setSatDate] = useState(defaultSatDate())
@@ -696,6 +702,14 @@ function Observatory({ visible }) {
                 {fmt(place.lat, 3)}°, {fmt(place.lon, 3)}°
               </span>
               {anyLoading && <span className="live-reading">reading…</span>}
+              {onAskAbout && !place.pin && (
+                <button
+                  className="ask-about"
+                  onClick={() => onAskAbout(place)}
+                >
+                  Ask about {place.name} →
+                </button>
+              )}
             </p>
           )}
 
@@ -787,12 +801,46 @@ function Observatory({ visible }) {
 // ------------------------------------------------------------
 // Ask tab
 // ------------------------------------------------------------
-function Ask() {
+function Ask({ prefill }) {
   const [question, setQuestion] = useState('')
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
   const [asked, setAsked] = useState(false)
+  const [listening, setListening] = useState(false)
+  const [voiceLang, setVoiceLang] = useState('en-IN')
+  const recRef = useRef(null)
+
+  const SR =
+    typeof window !== 'undefined' &&
+    (window.SpeechRecognition || window.webkitSpeechRecognition)
+
+  useEffect(() => {
+    if (prefill) setQuestion(prefill.text)
+  }, [prefill])
+
+  function toggleMic() {
+    if (!SR) return
+    if (listening) {
+      recRef.current?.stop()
+      return
+    }
+    const rec = new SR()
+    rec.lang = voiceLang
+    rec.interimResults = true
+    rec.continuous = false
+    rec.onresult = (e) => {
+      const t = Array.from(e.results)
+        .map((r) => r[0].transcript)
+        .join(' ')
+      setQuestion(t)
+    }
+    rec.onend = () => setListening(false)
+    rec.onerror = () => setListening(false)
+    recRef.current = rec
+    setListening(true)
+    rec.start()
+  }
 
   async function ask(q) {
     const query = (q ?? question).trim()
@@ -849,10 +897,44 @@ function Ask() {
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && ask()}
             />
+            {SR && (
+              <button
+                className={`mic-btn${listening ? ' is-listening' : ''}`}
+                onClick={toggleMic}
+                aria-label={listening ? 'Stop listening' : 'Ask by voice'}
+                title={listening ? 'Stop listening' : 'Ask by voice'}
+              >
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                  <path
+                    d="M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Zm-6.5 8a.9.9 0 0 1 1.8 0 4.7 4.7 0 0 0 9.4 0 .9.9 0 0 1 1.8 0 6.5 6.5 0 0 1-5.6 6.43V20h2.2a.9.9 0 0 1 0 1.8H8.9a.9.9 0 0 1 0-1.8h2.2v-2.57A6.5 6.5 0 0 1 5.5 11Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </button>
+            )}
             <button className="ask-btn" onClick={() => ask()} disabled={loading}>
               {loading ? 'Consulting…' : 'Ask'}
             </button>
           </div>
+
+          {SR && (
+            <div className="voice-row">
+              <span className="voice-label">
+                {listening ? 'Listening — speak now' : 'Voice input'}
+              </span>
+              <div className="voice-langs" role="group" aria-label="Voice language">
+                {VOICE_LANGS.map((v) => (
+                  <button
+                    key={v.code}
+                    className={`voice-lang${voiceLang === v.code ? ' is-on' : ''}`}
+                    onClick={() => setVoiceLang(v.code)}
+                  >
+                    {v.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {!asked && (
             <div className="chips" aria-label="Example questions">
@@ -993,9 +1075,20 @@ function App() {
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
+  const [prefill, setPrefill] = useState(null)
+
   function go(id) {
     setTab(id)
     history.replaceState(null, '', '#' + id)
+  }
+
+  function askAbout(place) {
+    const region = [place.region, place.country].filter(Boolean).join(', ')
+    setPrefill({
+      text: `Tell me about water in ${place.name}${region ? ', ' + region : ''}`,
+      at: Date.now(),
+    })
+    go('ask')
   }
 
   return (
@@ -1024,10 +1117,10 @@ function App() {
 
       <main className="content">
         <div hidden={tab !== 'ask'}>
-          <Ask />
+          <Ask prefill={prefill} />
         </div>
         <div hidden={tab !== 'observatory'}>
-          <Observatory visible={tab === 'observatory'} />
+          <Observatory visible={tab === 'observatory'} onAskAbout={askAbout} />
         </div>
         <div hidden={tab !== 'about'}>
           <About />
@@ -1036,9 +1129,8 @@ function App() {
 
       <footer className="footer">
         <p>
-          A Water Intelligence Modeling initiative · Answers come from a
-          curated corpus and are labelled by source tier · Live data from open
-          satellite and model feeds, not official warnings.
+          A Water Intelligence Modeling initiative · Built on open data —
+          Open-Meteo, Copernicus, NASA EOSDIS, OpenStreetMap.
         </p>
       </footer>
     </div>

@@ -1,14 +1,23 @@
 :root {
-  /* WIM palette — water column, surface to depth */
-  --paper: #f4f8f8;
+  /* WIM palette — water column, surface to depth (refined) */
+  --paper: #f6f9fa;
+  --paper-low: #eaf2f4;
   --card: #ffffff;
-  --ink: #0c2b33;
-  --ink-soft: #47656f;
-  --ink-faint: #7d959c;
-  --hairline: #dbe6e7;
-  --brand: #0e7490;
-  --brand-deep: #083d4f;
-  --brand-wash: #e3f1f4;
+  --ink: #0b262e;
+  --ink-soft: #44626c;
+  --ink-faint: #7b939b;
+  --hairline: #d9e5e8;
+  --brand: #0b6b85;
+  --brand-deep: #06364a;
+  --brand-wash: #e1eff3;
+
+  /* dark instrument */
+  --deep-a: #073c4c;
+  --deep-b: #052732;
+  --deep-card: rgba(5, 39, 50, 0.85);
+  --deep-line: rgba(167, 220, 232, 0.17);
+  --deep-ink: #eef7f9;
+  --deep-soft: rgba(178, 222, 233, 0.8);
 
   /* strata (the seven layers) */
   --s1: #a7dce8;
@@ -41,7 +50,10 @@ html {
 
 body {
   margin: 0;
-  background: var(--paper);
+  background:
+    radial-gradient(1100px 500px at 85% -10%, rgba(111, 191, 212, 0.14), transparent 60%),
+    linear-gradient(180deg, var(--paper) 0%, var(--paper-low) 100%);
+  background-attachment: fixed;
   color: var(--ink);
   font-family: var(--font-body);
   font-size: 16px;
