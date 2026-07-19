@@ -7,6 +7,179 @@ import './App.css'
 // (Deploy > New deployment > Web app > copy the /exec URL)
 const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbyUyZqGshX-MmaaUBvFk6dSSGlEKaxhtPc-rtRXW_m1W0uqdmgFnGcYfOUyaT5hhFhLkA/exec'
 
+// ============================================================
+// DATA-FEED REGISTRY
+// Every external source the Observatory reads is declared here.
+// To add a new API later: add one entry (id, label, provider,
+// url builder, extract) and, if it produces numbers, reference
+// the extracted fields in METRIC_GROUPS below. The status rail,
+// fetching, and source ledger all follow automatically.
+// ============================================================
+const FEEDS = [
+  {
+    id: 'weather',
+    label: 'Weather & water balance',
+    provider: 'Open-Meteo forecast API',
+    required: true,
+    url: (p) =>
+      'https://api.open-meteo.com/v1/forecast' +
+      `?latitude=${p.lat}&longitude=${p.lon}` +
+      '&daily=precipitation_sum,temperature_2m_max,temperature_2m_min,et0_fao_evapotranspiration' +
+      '&hourly=soil_moisture_3_to_9cm' +
+      '&past_days=7&forecast_days=7&timezone=auto',
+    extract: (w) => {
+      if (!w || !w.daily) return null
+      const rain = w.daily.precipitation_sum.map((v) => v ?? 0)
+      const sm = (w.hourly?.soil_moisture_3_to_9cm || []).filter((v) => v !== null)
+      return {
+        dates: w.daily.time,
+        rain,
+        rainToday: rain[7] ?? 0,
+        rainNext7: rain.slice(7).reduce((x, y) => x + y, 0),
+        rainPast7: rain.slice(0, 7).reduce((x, y) => x + y, 0),
+        tmax: w.daily.temperature_2m_max[7],
+        tmin: w.daily.temperature_2m_min[7],
+        et0: w.daily.et0_fao_evapotranspiration[7],
+        soil: sm.length ? sm[sm.length - 1] : null,
+      }
+    },
+  },
+  {
+    id: 'flood',
+    label: 'River discharge',
+    provider: 'Copernicus GloFAS via Open-Meteo',
+    url: (p) =>
+      'https://flood-api.open-meteo.com/v1/flood' +
+      `?latitude=${p.lat}&longitude=${p.lon}` +
+      '&daily=river_discharge,river_discharge_max&past_days=7&forecast_days=30',
+    extract: (f) => {
+      if (!f?.daily) return null
+      const fMax = (f.daily.river_discharge_max || []).slice(7).filter((v) => v !== null)
+      return {
+        discharge: f.daily.river_discharge?.[7] ?? null,
+        discharge30Max: fMax.length ? Math.max(...fMax) : null,
+      }
+    },
+  },
+  {
+    id: 'air',
+    label: 'Air quality',
+    provider: 'Open-Meteo air-quality API (CAMS)',
+    url: (p) =>
+      'https://air-quality-api.open-meteo.com/v1/air-quality' +
+      `?latitude=${p.lat}&longitude=${p.lon}&hourly=pm2_5,pm10&forecast_days=1`,
+    extract: (a) => {
+      const pm25 = (a?.hourly?.pm2_5 || []).filter((v) => v !== null)
+      const pm10 = (a?.hourly?.pm10 || []).filter((v) => v !== null)
+      if (!pm25.length && !pm10.length) return null
+      return {
+        pm25: pm25.length ? pm25[pm25.length - 1] : null,
+        pm10: pm10.length ? pm10[pm10.length - 1] : null,
+      }
+    },
+  },
+  {
+    id: 'elevation',
+    label: 'Elevation',
+    provider: 'Open-Meteo elevation API (90 m DEM)',
+    url: (p) =>
+      `https://api.open-meteo.com/v1/elevation?latitude=${p.lat}&longitude=${p.lon}`,
+    extract: (e) =>
+      e?.elevation?.[0] !== undefined ? { elevation: e.elevation[0] } : null,
+  },
+  {
+    id: 'climate',
+    label: 'Climate outlook 2045',
+    provider: 'CMIP6 downscaled via Open-Meteo',
+    url: (p) =>
+      'https://climate-api.open-meteo.com/v1/climate' +
+      `?latitude=${p.lat}&longitude=${p.lon}` +
+      '&start_date=2045-01-01&end_date=2045-12-31' +
+      '&models=MRI_AGCM3_2_S&daily=temperature_2m_max,precipitation_sum',
+    extract: (c) => {
+      const ct = (c?.daily?.temperature_2m_max || []).filter((v) => v !== null)
+      const cp = (c?.daily?.precipitation_sum || []).filter((v) => v !== null)
+      if (!ct.length && !cp.length) return null
+      return {
+        projTmax: ct.length ? ct.reduce((x, y) => x + y, 0) / ct.length : null,
+        projPrecip: cp.length ? cp.reduce((x, y) => x + y, 0) : null,
+      }
+    },
+  },
+]
+
+// Metric tiles, grouped. `field` names come from the FEEDS
+// extract functions above.
+const METRIC_GROUPS = [
+  {
+    title: 'Rainfall and water balance',
+    metrics: [
+      { field: 'rainToday', label: 'Rain today', unit: 'mm', digits: 1 },
+      { field: 'rainNext7', label: 'Next 7 days', unit: 'mm', digits: 0 },
+      { field: 'soil', label: 'Soil moisture 3–9 cm', unit: 'm³/m³', digits: 2 },
+      { field: 'et0', label: 'Evapotranspiration ET₀', unit: 'mm', digits: 1 },
+    ],
+  },
+  {
+    title: 'Rivers and terrain',
+    metrics: [
+      { field: 'discharge', label: 'River discharge today', unit: 'm³/s', digits: 2 },
+      { field: 'discharge30Max', label: '30-day forecast peak', unit: 'm³/s', digits: 1 },
+      { field: 'elevation', label: 'Elevation', unit: 'm', digits: 0 },
+      { field: 'tmax', label: 'Max / min today', unit: '°C', digits: 0, pair: 'tmin' },
+    ],
+  },
+  {
+    title: 'Air and climate outlook',
+    metrics: [
+      { field: 'pm25', label: 'PM2.5 now', unit: 'µg/m³', digits: 0 },
+      { field: 'pm10', label: 'PM10 now', unit: 'µg/m³', digits: 0 },
+      { field: 'projTmax', label: 'Mean daily max, 2045 (CMIP6)', unit: '°C', digits: 1 },
+      { field: 'projPrecip', label: 'Annual rainfall, 2045 (CMIP6)', unit: 'mm', digits: 0 },
+    ],
+  },
+]
+
+// NASA GIBS satellite overlays (WMS, EPSG:3857). Registry-shaped:
+// add a layer here and it appears as a chip.
+const GIBS_WMS = 'https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi?'
+
+const SAT_LAYERS = [
+  { id: 'none', label: 'None', layer: null, legend: null },
+  {
+    id: 'truecolor',
+    label: 'True colour',
+    layer: 'VIIRS_SNPP_CorrectedReflectance_TrueColor',
+    opacity: 1,
+    legend:
+      'VIIRS corrected reflectance — what the satellite sees. Cloud, sediment plumes, snow and flooding are visible directly. VIIRS images the whole planet each day without swath gaps.',
+  },
+  {
+    id: 'precip',
+    label: 'Precipitation',
+    layer: 'IMERG_Precipitation_Rate',
+    opacity: 0.75,
+    legend:
+      'GPM IMERG precipitation rate — half-hourly global rainfall from the satellite constellation. Blue is light, red is intense.',
+  },
+  {
+    id: 'lst',
+    label: 'Land surface temp',
+    layer: 'MODIS_Aqua_Land_Surface_Temp_Day',
+    opacity: 0.75,
+    legend:
+      'MODIS daytime land surface temperature — the skin temperature of the ground, a strong proxy for drought and heat stress.',
+  },
+  {
+    id: 'ndvi',
+    label: 'Vegetation',
+    layer: 'MODIS_Terra_NDVI_8Day',
+    opacity: 0.8,
+    legend:
+      'MODIS NDVI, 8-day composite — vegetation vigour. Green is dense growth; pale is sparse or stressed cover.',
+  },
+]
+
 const TIERS = {
   curated: { label: 'Curated source', cls: 'tier-curated' },
   web_verified: { label: 'Web-sourced · human-verified', cls: 'tier-web' },
@@ -20,7 +193,7 @@ const EXAMPLES = [
   'ಕುಡಿಯುವ ನೀರಿನ ಗುಣಮಟ್ಟ ಎಂದರೇನು?',
 ]
 
-const LAYERS = [
+const WIM_LAYERS = [
   'Physical systems',
   'Observation',
   'Engineering models',
@@ -30,51 +203,40 @@ const LAYERS = [
   'Intelligence',
 ]
 
-// Opening view: the whole planet. Any point on Earth can be
-// clicked or searched.
-const START = { name: 'Select a point', region: '', country: '', lat: 20, lon: 0 }
-
-// ------------------------------------------------------------
-// NASA GIBS satellite overlays, served over WMS (EPSG:3857).
-// WMS is used rather than WMTS because it handles the time
-// dimension without hardcoded tile-matrix levels.
-// ------------------------------------------------------------
-const GIBS_WMS = 'https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi?'
-
-const SAT_LAYERS = [
-  { id: 'none', label: 'None', layer: null, legend: null },
+const TIER_GUIDE = [
   {
-    id: 'truecolor',
-    label: 'True colour',
-    layer: 'VIIRS_SNPP_CorrectedReflectance_TrueColor',
-    opacity: 1,
-    legend: 'VIIRS corrected reflectance — what the satellite sees. Cloud, sediment plumes, snow and flooding are visible directly. VIIRS has a wide enough swath to image the whole planet each day without gaps.',
+    cls: 'dot-curated',
+    title: 'Curated source',
+    text: 'Standards, official publications and expert-written material, reviewed before it enters the corpus. The strongest tier.',
   },
   {
-    id: 'precip',
-    label: 'Precipitation',
-    layer: 'IMERG_Precipitation_Rate',
-    opacity: 0.75,
-    legend: 'GPM IMERG precipitation rate — half-hourly global rainfall from the satellite constellation. Blue is light, red is intense.',
+    cls: 'dot-web',
+    title: 'Web-sourced · human-verified',
+    text: 'Gathered from the open web, then checked and approved by a domain expert before being admitted.',
   },
   {
-    id: 'lst',
-    label: 'Land surface temp',
-    layer: 'MODIS_Aqua_Land_Surface_Temp_Day',
-    opacity: 0.75,
-    legend: 'MODIS daytime land surface temperature — the skin temperature of the ground, a strong proxy for drought and heat stress.',
-  },
-  {
-    id: 'ndvi',
-    label: 'Vegetation',
-    layer: 'MODIS_Terra_NDVI_8Day',
-    opacity: 0.8,
-    legend: 'MODIS NDVI, 8-day composite — vegetation vigour. Green is dense growth; pale is sparse or stressed cover. Composited over eight days, so daily gaps are filled.',
+    cls: 'dot-pending',
+    title: 'Logged for review',
+    text: 'The corpus cannot answer this yet. The question is recorded, reviewed by an expert, and the gap is closed.',
   },
 ]
 
-// GIBS daily products lag acquisition, so ask for a recent past
-// day rather than today (today is often empty worldwide).
+const LOOP_STEPS = [
+  { title: 'You ask', text: 'Any water question, in English, Hindi or Kannada.' },
+  { title: 'Corpus search', text: 'Keyword and cross-language semantic search over curated documents.' },
+  { title: 'Grounded answer', text: 'Composed only from retrieved passages, never invented, always labelled by tier.' },
+  { title: 'Gaps close', text: 'Unanswered questions are logged, expert-reviewed, and folded back into the corpus.' },
+]
+
+const TABS = [
+  { id: 'ask', label: 'Ask' },
+  { id: 'observatory', label: 'Observatory' },
+  { id: 'about', label: 'About WIM' },
+]
+
+// ------------------------------------------------------------
+// helpers
+// ------------------------------------------------------------
 function ymd(d) {
   return d.toISOString().slice(0, 10)
 }
@@ -99,15 +261,14 @@ function prettyDate(iso) {
   })
 }
 
+function fmt(v, digits = 1) {
+  if (v === null || v === undefined || Number.isNaN(v)) return '—'
+  return Number(v).toFixed(digits)
+}
+
 function StrataMark({ size = 22 }) {
   return (
-    <svg
-      className="strata-mark"
-      width={size}
-      height={size}
-      viewBox="0 0 32 32"
-      aria-hidden="true"
-    >
+    <svg className="strata-mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
       <rect width="32" height="32" rx="7" fill="var(--brand-deep)" />
       <g fill="none" strokeLinecap="round" strokeWidth="2">
         <path d="M8 9h16" stroke="var(--s1)" />
@@ -120,96 +281,44 @@ function StrataMark({ size = 22 }) {
   )
 }
 
-function fmt(v, digits = 1) {
-  if (v === null || v === undefined || Number.isNaN(v)) return '—'
-  return Number(v).toFixed(digits)
-}
-
 // ------------------------------------------------------------
-// All observation data for one point on Earth. Every source is
-// free, keyless and CORS-enabled, so it runs entirely in the
-// browser with no backend involved.
+// Observations: runs every registered feed for one point,
+// tracking per-feed status for the status rail.
 // ------------------------------------------------------------
 function useObservations(place) {
   const [d, setD] = useState(null)
-  const [state, setState] = useState('idle') // idle | loading | ok | error
+  const [status, setStatus] = useState({}) // feedId -> loading|ok|error|off
   const reqId = useRef(0)
 
   useEffect(() => {
-    if (place.lat === null) return
+    if (!place) return
     const id = ++reqId.current
-    setState('loading')
+    setD(null)
+    setStatus(Object.fromEntries(FEEDS.map((f) => [f.id, 'loading'])))
 
-    const j = (u) => fetch(u).then((r) => r.json()).catch(() => null)
-    const { lat, lon } = place
-
-    const weather = j(
-      'https://api.open-meteo.com/v1/forecast' +
-        `?latitude=${lat}&longitude=${lon}` +
-        '&daily=precipitation_sum,temperature_2m_max,temperature_2m_min,et0_fao_evapotranspiration' +
-        '&hourly=soil_moisture_3_to_9cm' +
-        '&past_days=7&forecast_days=7&timezone=auto'
-    )
-    const flood = j(
-      'https://flood-api.open-meteo.com/v1/flood' +
-        `?latitude=${lat}&longitude=${lon}` +
-        '&daily=river_discharge,river_discharge_max&past_days=7&forecast_days=30'
-    )
-    const air = j(
-      'https://air-quality-api.open-meteo.com/v1/air-quality' +
-        `?latitude=${lat}&longitude=${lon}&hourly=pm2_5,pm10&forecast_days=1`
-    )
-    const elev = j(
-      `https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lon}`
-    )
-    const climate = j(
-      'https://climate-api.open-meteo.com/v1/climate' +
-        `?latitude=${lat}&longitude=${lon}` +
-        '&start_date=2045-01-01&end_date=2045-12-31' +
-        '&models=MRI_AGCM3_2_S&daily=temperature_2m_max,precipitation_sum'
-    )
-
-    Promise.all([weather, flood, air, elev, climate])
-      .then(([w, f, a, e, c]) => {
-        if (id !== reqId.current) return
-        if (!w || !w.daily) throw new Error('no weather')
-
-        const rain = w.daily.precipitation_sum.map((v) => v ?? 0)
-        const sm = (w.hourly?.soil_moisture_3_to_9cm || []).filter((v) => v !== null)
-        const pm25 = (a?.hourly?.pm2_5 || []).filter((v) => v !== null)
-        const pm10 = (a?.hourly?.pm10 || []).filter((v) => v !== null)
-        const fMax = (f?.daily?.river_discharge_max || [])
-          .slice(7)
-          .filter((v) => v !== null)
-        const ct = (c?.daily?.temperature_2m_max || []).filter((v) => v !== null)
-        const cp = (c?.daily?.precipitation_sum || []).filter((v) => v !== null)
-
-        setD({
-          dates: w.daily.time,
-          rain,
-          rainToday: rain[7] ?? 0,
-          rainNext7: rain.slice(7).reduce((x, y) => x + y, 0),
-          rainPast7: rain.slice(0, 7).reduce((x, y) => x + y, 0),
-          tmax: w.daily.temperature_2m_max[7],
-          tmin: w.daily.temperature_2m_min[7],
-          et0: w.daily.et0_fao_evapotranspiration[7],
-          soil: sm.length ? sm[sm.length - 1] : null,
-          discharge: f?.daily?.river_discharge?.[7] ?? null,
-          discharge30Max: fMax.length ? Math.max(...fMax) : null,
-          pm25: pm25.length ? pm25[pm25.length - 1] : null,
-          pm10: pm10.length ? pm10[pm10.length - 1] : null,
-          elevation: e?.elevation?.[0] ?? null,
-          projTmax: ct.length ? ct.reduce((x, y) => x + y, 0) / ct.length : null,
-          projPrecip: cp.length ? cp.reduce((x, y) => x + y, 0) : null,
+    const merged = {}
+    FEEDS.forEach((feed) => {
+      fetch(feed.url(place))
+        .then((r) => r.json())
+        .then((raw) => {
+          if (id !== reqId.current) return
+          const out = feed.extract(raw)
+          if (out) {
+            Object.assign(merged, out)
+            setD({ ...merged })
+            setStatus((s) => ({ ...s, [feed.id]: 'ok' }))
+          } else {
+            setStatus((s) => ({ ...s, [feed.id]: feed.required ? 'error' : 'off' }))
+          }
         })
-        setState('ok')
-      })
-      .catch(() => {
-        if (id === reqId.current) setState('error')
-      })
+        .catch(() => {
+          if (id !== reqId.current) return
+          setStatus((s) => ({ ...s, [feed.id]: 'error' }))
+        })
+    })
   }, [place])
 
-  return { d, state }
+  return { d, status }
 }
 
 // ------------------------------------------------------------
@@ -337,26 +446,25 @@ function PlaceSearch({ onPick }) {
 // ------------------------------------------------------------
 // The world map. Click any point to read it.
 // ------------------------------------------------------------
-function WorldMap({ place, onPick, satId, satDate }) {
+function WorldMap({ place, onPick, satId, satDate, visible }) {
   const elRef = useRef(null)
   const mapRef = useRef(null)
   const markerRef = useRef(null)
   const overlayRef = useRef(null)
 
-  // create once
   useEffect(() => {
     if (mapRef.current || !elRef.current) return
     const map = L.map(elRef.current, {
-      center: [20, 0],
+      center: [20, 10],
       zoom: 2,
       minZoom: 2,
       worldCopyJump: true,
       attributionControl: false,
     })
-    L.tileLayer(
-      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      { subdomains: 'abcd', maxZoom: 19 }
-    ).addTo(map)
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      subdomains: 'abcd',
+      maxZoom: 19,
+    }).addTo(map)
 
     map.on('click', (e) => {
       const { lat, lng } = e.latlng
@@ -370,9 +478,20 @@ function WorldMap({ place, onPick, satId, satDate }) {
       })
     })
     mapRef.current = map
-    // size correctly once laid out
     setTimeout(() => map.invalidateSize(), 0)
+    return () => {
+      map.remove()
+      mapRef.current = null
+    }
   }, [onPick])
+
+  // tabs keep panels mounted; when this one becomes visible the
+  // map needs a size recalculation
+  useEffect(() => {
+    if (visible && mapRef.current) {
+      setTimeout(() => mapRef.current && mapRef.current.invalidateSize(), 60)
+    }
+  }, [visible])
 
   // satellite overlay
   useEffect(() => {
@@ -400,7 +519,7 @@ function WorldMap({ place, onPick, satId, satDate }) {
   // marker follows the selected place
   useEffect(() => {
     const map = mapRef.current
-    if (!map || place.lat === null) return
+    if (!map || !place) return
     if (markerRef.current) map.removeLayer(markerRef.current)
     const m = L.circleMarker([place.lat, place.lon], {
       radius: 7,
@@ -410,10 +529,18 @@ function WorldMap({ place, onPick, satId, satDate }) {
       fillOpacity: 0.95,
     }).addTo(map)
     markerRef.current = m
-    if (!place.pin) map.flyTo([place.lat, place.lon], Math.max(map.getZoom(), 7), { duration: 0.8 })
+    if (!place.pin)
+      map.flyTo([place.lat, place.lon], Math.max(map.getZoom(), 7), { duration: 0.8 })
   }, [place])
 
-  return <div className="map" ref={elRef} role="application" aria-label="World map. Click a point to read conditions there." />
+  return (
+    <div
+      className="map"
+      ref={elRef}
+      role="application"
+      aria-label="World map. Click a point to read conditions there."
+    />
+  )
 }
 
 function RainChart({ dates, rain, past7, next7 }) {
@@ -472,33 +599,41 @@ function RainChart({ dates, rain, past7, next7 }) {
   )
 }
 
-function Observatory() {
-  const [place, setPlace] = useState(START)
+// ------------------------------------------------------------
+// Observatory tab
+// ------------------------------------------------------------
+function Observatory({ visible }) {
+  const [place, setPlace] = useState(null)
   const [satId, setSatId] = useState('truecolor')
   const [satDate, setSatDate] = useState(defaultSatDate())
-  const { d, state } = useObservations(place)
+  const { d, status } = useObservations(place)
 
   const sat = SAT_LAYERS.find((s) => s.id === satId)
-  const where = [place.region, place.country].filter(Boolean).join(' · ')
-  const chosen = place.lat !== null && place !== START
+  // dedupe: a country-level result can have name === country
+  const whereParts = [place?.region, place?.country].filter(
+    (x, i, arr) => Boolean(x) && x !== place?.name && arr.indexOf(x) === i
+  )
+  const where = whereParts.join(' · ')
+  const anyLoading = Object.values(status).some((s) => s === 'loading')
+  const weatherOk = status.weather === 'ok'
 
   return (
-    <section id="live" className="live">
-      <div className="live-inner">
-        <div className="live-head">
+    <div className="pane pane-dark">
+      <div className="pane-inner">
+        <header className="ob-head">
           <div>
             <p className="eyebrow eyebrow-light">Observation layer · live</p>
-            <h2>The water observatory</h2>
-            <p className="live-sub">
+            <h1>The water observatory</h1>
+            <p className="ob-sub">
               Click anywhere on Earth, or search a place, to read current
               conditions from open satellite and model data.
             </p>
           </div>
           <PlaceSearch onPick={setPlace} />
-        </div>
+        </header>
 
         <div className="sat-bar">
-          <span className="sat-label">Satellite layer</span>
+          <span className="rail-label">Satellite layer</span>
           <div className="sat-chips">
             {SAT_LAYERS.map((s) => (
               <button
@@ -512,17 +647,11 @@ function Observatory() {
           </div>
           {satId !== 'none' && (
             <div className="sat-date">
-              <button
-                onClick={() => setSatDate((d) => shiftDate(d, -1))}
-                aria-label="Previous day"
-              >
+              <button onClick={() => setSatDate((v) => shiftDate(v, -1))} aria-label="Previous day">
                 ‹
               </button>
               <span>{prettyDate(satDate)}</span>
-              <button
-                onClick={() => setSatDate((d) => shiftDate(d, 1))}
-                aria-label="Next day"
-              >
+              <button onClick={() => setSatDate((v) => shiftDate(v, 1))} aria-label="Next day">
                 ›
               </button>
             </div>
@@ -534,191 +663,131 @@ function Observatory() {
           onPick={setPlace}
           satId={satId}
           satDate={satDate}
+          visible={visible}
         />
 
         {sat && sat.legend && (
           <p className="sat-legend">
             {sat.legend}
-            {satId !== 'none' && (
-              <span className="sat-gap-note">
-                {' '}
-                Polar-orbiting satellites build each day from successive
-                passes, so a day can be incomplete over some regions. Step
-                back a day if you hit a gap.
-              </span>
-            )}
+            <span className="sat-gap-note">
+              {' '}
+              Polar-orbiting satellites build each day from successive passes;
+              if a region looks incomplete, step back a day.
+            </span>
           </p>
         )}
 
         <div className="readout">
-          <p className="live-place">
-            {chosen ? (
-              <>
-                {place.name}
-                {where && <span className="live-place-sub"> · {where}</span>}
-                <span className="live-coords">
-                  {fmt(place.lat, 3)}°, {fmt(place.lon, 3)}°
-                </span>
-              </>
-            ) : (
-              <span className="live-place-sub">
-                No point selected yet — click the map or search above.
-              </span>
-            )}
-          </p>
-
-          {chosen && state === 'loading' && (
-            <p className="live-status">Reading conditions at this point…</p>
+          {!place && (
+            <div className="ob-empty">
+              <StrataMark size={30} />
+              <p>
+                No point selected yet. Click the map or search a place, and the
+                connected feeds below will read it.
+              </p>
+            </div>
           )}
-          {chosen && state === 'error' && (
-            <p className="live-status">
-              Data is unavailable for this point right now. Try another point
-              or retry in a moment.
+
+          {place && (
+            <p className="live-place">
+              {place.name}
+              {where && <span className="live-place-sub"> · {where}</span>}
+              <span className="live-coords">
+                {fmt(place.lat, 3)}°, {fmt(place.lon, 3)}°
+              </span>
+              {anyLoading && <span className="live-reading">reading…</span>}
             </p>
           )}
 
-          {chosen && state === 'ok' && d && (
+          {place && status.weather === 'error' && (
+            <p className="live-status">
+              The weather feed could not read this point. Try another point or
+              retry in a moment.
+            </p>
+          )}
+
+          {place && weatherOk && d && (
             <>
-              <h3 className="group-head">Rainfall and water balance</h3>
-              <div className="metrics">
-                <div className="metric">
-                  <span className="metric-value">{fmt(d.rainToday)}<em>mm</em></span>
-                  <span className="metric-label">Rain today</span>
+              {METRIC_GROUPS.map((g) => (
+                <div key={g.title}>
+                  <h2 className="group-head">{g.title}</h2>
+                  <div className="metrics">
+                    {g.metrics.map((m) => (
+                      <div key={m.field} className="metric">
+                        <span className="metric-value">
+                          {fmt(d[m.field], m.digits)}
+                          {m.pair ? (
+                            <span className="metric-sub"> / {fmt(d[m.pair], m.digits)}°</span>
+                          ) : (
+                            <em>{m.unit}</em>
+                          )}
+                        </span>
+                        <span className="metric-label">{m.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {g.title === 'Rainfall and water balance' && d.dates && (
+                    <RainChart
+                      dates={d.dates}
+                      rain={d.rain}
+                      past7={d.rainPast7}
+                      next7={d.rainNext7}
+                    />
+                  )}
                 </div>
-                <div className="metric">
-                  <span className="metric-value">{fmt(d.rainNext7, 0)}<em>mm</em></span>
-                  <span className="metric-label">Next 7 days</span>
-                </div>
-                <div className="metric">
-                  <span className="metric-value">
-                    {d.soil !== null ? fmt(d.soil, 2) : '—'}<em>m³/m³</em>
-                  </span>
-                  <span className="metric-label">Soil moisture 3–9 cm</span>
-                </div>
-                <div className="metric">
-                  <span className="metric-value">{fmt(d.et0)}<em>mm</em></span>
-                  <span className="metric-label">Evapotranspiration ET₀</span>
-                </div>
-              </div>
-
-              <RainChart
-                dates={d.dates}
-                rain={d.rain}
-                past7={d.rainPast7}
-                next7={d.rainNext7}
-              />
-
-              <h3 className="group-head">Rivers and terrain</h3>
-              <div className="metrics">
-                <div className="metric">
-                  <span className="metric-value">{fmt(d.discharge, 2)}<em>m³/s</em></span>
-                  <span className="metric-label">River discharge today</span>
-                </div>
-                <div className="metric">
-                  <span className="metric-value">{fmt(d.discharge30Max, 1)}<em>m³/s</em></span>
-                  <span className="metric-label">30-day forecast peak</span>
-                </div>
-                <div className="metric">
-                  <span className="metric-value">{fmt(d.elevation, 0)}<em>m</em></span>
-                  <span className="metric-label">Elevation</span>
-                </div>
-                <div className="metric">
-                  <span className="metric-value">
-                    {fmt(d.tmax, 0)}°<span className="metric-sub"> / {fmt(d.tmin, 0)}°</span>
-                  </span>
-                  <span className="metric-label">Max / min today</span>
-                </div>
-              </div>
-
-              <h3 className="group-head">Air and climate outlook</h3>
-              <div className="metrics">
-                <div className="metric">
-                  <span className="metric-value">{fmt(d.pm25, 0)}<em>µg/m³</em></span>
-                  <span className="metric-label">PM2.5 now</span>
-                </div>
-                <div className="metric">
-                  <span className="metric-value">{fmt(d.pm10, 0)}<em>µg/m³</em></span>
-                  <span className="metric-label">PM10 now</span>
-                </div>
-                <div className="metric">
-                  <span className="metric-value">{fmt(d.projTmax, 1)}°<em>C</em></span>
-                  <span className="metric-label">Mean daily max, 2045 (CMIP6)</span>
-                </div>
-                <div className="metric">
-                  <span className="metric-value">{fmt(d.projPrecip, 0)}<em>mm</em></span>
-                  <span className="metric-label">Annual rainfall, 2045 (CMIP6)</span>
-                </div>
-              </div>
+              ))}
             </>
           )}
         </div>
 
-        <div className="sources">
-          <h3>Where this comes from</h3>
-          <ul>
-            <li>
-              <strong>Weather, ET₀, soil moisture, elevation, climate projections</strong>
-              <span>
-                <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a>{' '}
-                — forecast, air-quality, elevation and CMIP6 climate APIs (CC-BY 4.0)
+        <div className="feeds">
+          <h2 className="group-head">Connected data feeds</h2>
+          <ul className="feed-list">
+            {FEEDS.map((f) => (
+              <li key={f.id} className="feed">
+                <span className={`feed-dot feed-${status[f.id] || 'idle'}`} aria-hidden="true" />
+                <span className="feed-name">{f.label}</span>
+                <span className="feed-provider">{f.provider}</span>
+              </li>
+            ))}
+            <li className="feed">
+              <span className="feed-dot feed-ok" aria-hidden="true" />
+              <span className="feed-name">Satellite imagery</span>
+              <span className="feed-provider">NASA GIBS — VIIRS, MODIS, GPM IMERG</span>
+            </li>
+            <li className="feed">
+              <span className="feed-dot feed-ok" aria-hidden="true" />
+              <span className="feed-name">Place search · base map</span>
+              <span className="feed-provider">
+                Open-Meteo geocoding · © OpenStreetMap, © CARTO
               </span>
-            </li>
-            <li>
-              <strong>River discharge</strong>
-              <span>Copernicus GloFAS global flood model, via the Open-Meteo Flood API</span>
-            </li>
-            <li>
-              <strong>Satellite imagery</strong>
-              <span>
-                NASA{' '}
-                <a href="https://worldview.earthdata.nasa.gov/" target="_blank" rel="noreferrer">GIBS / Worldview</a>{' '}
-                — MODIS Terra, GPM IMERG (EOSDIS)
-              </span>
-            </li>
-            <li>
-              <strong>Place search and base map</strong>
-              <span>Open-Meteo geocoding · © OpenStreetMap contributors, © CARTO</span>
             </li>
           </ul>
           <p className="live-note">
-            These are global model and satellite products, shown for
-            orientation and education. They are not official warnings, and
-            they are coarse at local scale. For any decision, use the
-            responsible national meteorological, hydrological or disaster
-            management agency for the location in question.
+            All feeds are open, keyless APIs read directly in your browser —
+            weather by{' '}
+            <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">
+              Open-Meteo.com
+            </a>{' '}
+            (CC-BY 4.0), imagery via NASA{' '}
+            <a href="https://worldview.earthdata.nasa.gov/" target="_blank" rel="noreferrer">
+              GIBS / Worldview
+            </a>
+            . These are global model and satellite products, shown for
+            orientation and education; they are not official warnings and are
+            coarse at local scale. For decisions, use the responsible national
+            meteorological, hydrological or disaster management agency.
           </p>
         </div>
       </div>
-    </section>
+    </div>
   )
 }
 
-const TIER_GUIDE = [
-  {
-    cls: 'dot-curated',
-    title: 'Curated source',
-    text: 'Standards, official publications and expert-written material, reviewed before it enters the corpus. The strongest tier.',
-  },
-  {
-    cls: 'dot-web',
-    title: 'Web-sourced · human-verified',
-    text: 'Gathered from the open web, then checked and approved by a domain expert before being admitted.',
-  },
-  {
-    cls: 'dot-pending',
-    title: 'Logged for review',
-    text: 'The corpus cannot answer this yet. The question is recorded, reviewed by an expert, and the gap is closed.',
-  },
-]
-
-const LOOP_STEPS = [
-  { title: 'You ask', text: 'Any water question, in English, Hindi or Kannada.' },
-  { title: 'Corpus search', text: 'Keyword and cross-language semantic search over curated documents.' },
-  { title: 'Grounded answer', text: 'Composed only from retrieved passages, never invented, always labelled by tier.' },
-  { title: 'Gaps close', text: 'Unanswered questions are logged, expert-reviewed, and folded back into the corpus.' },
-]
-
-function App() {
+// ------------------------------------------------------------
+// Ask tab
+// ------------------------------------------------------------
+function Ask() {
   const [question, setQuestion] = useState('')
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
@@ -755,21 +824,8 @@ function App() {
   const tier = result ? TIERS[result.tier] || { label: result.tier, cls: '' } : null
 
   return (
-    <>
-      <nav className="topbar">
-        <div className="topbar-inner">
-          <span className="brand">
-            <StrataMark />
-            <span className="brand-name">WIM-Assistant</span>
-          </span>
-          <span className="topbar-links">
-            <a className="topbar-link" href="#live">Observatory</a>
-            <a className="topbar-link" href="#about">About WIM</a>
-          </span>
-        </div>
-      </nav>
-
-      <main className="main">
+    <div className="pane pane-light">
+      <div className="pane-inner">
         <section className="hero">
           <p className="eyebrow">Water Intelligence Modeling · Intelligence layer</p>
           <h1>
@@ -813,7 +869,11 @@ function App() {
           {loading && (
             <div className="answer-card loading-card">
               <div className="pulse-strata">
-                <span /><span /><span /><span /><span />
+                <span />
+                <span />
+                <span />
+                <span />
+                <span />
               </div>
               <p className="loading-text">Searching the corpus and composing an answer…</p>
             </div>
@@ -845,13 +905,42 @@ function App() {
             </article>
           )}
         </section>
-      </main>
+      </div>
+    </div>
+  )
+}
 
-      <Observatory />
+// ------------------------------------------------------------
+// About tab
+// ------------------------------------------------------------
+function About() {
+  return (
+    <div className="pane pane-light">
+      <div className="pane-inner about-inner">
+        <section className="about-block">
+          <p className="eyebrow">The framework</p>
+          <h1>What is WIM?</h1>
+          <p className="about-text">
+            Water Intelligence Modeling is a framework that integrates water
+            data, engineering knowledge, environmental processes, and
+            governance into a single evolving knowledge model — aiming to
+            become for water what BIM became for buildings. WIM-Assistant is
+            its intelligence layer: it explains, interprets regulations, and
+            learns continuously. Questions it cannot yet answer are logged,
+            reviewed by domain experts, and folded back into the corpus.
+          </p>
+          <ol className="layers" aria-label="The seven layers of WIM">
+            {WIM_LAYERS.map((l, i) => (
+              <li key={l} style={{ '--i': i }}>
+                <span className="layer-bar" />
+                {l}
+              </li>
+            ))}
+          </ol>
+        </section>
 
-      <section className="grading">
-        <div className="grading-inner">
-          <p className="eyebrow">Knowledge layer · provenance</p>
+        <section className="about-block">
+          <p className="eyebrow">Provenance</p>
           <h2>Every answer tells you where it came from</h2>
           <div className="tier-cards">
             {TIER_GUIDE.map((t) => (
@@ -867,12 +956,10 @@ function App() {
             standing caveat: verify against the current official source,
             because rules change and a stale answer can mislead.
           </p>
-        </div>
-      </section>
+        </section>
 
-      <section className="loop">
-        <div className="loop-inner">
-          <p className="eyebrow">Intelligence layer · learning</p>
+        <section className="about-block">
+          <p className="eyebrow">Learning</p>
           <h2>How it learns</h2>
           <ol className="loop-steps">
             {LOOP_STEPS.map((s) => (
@@ -882,40 +969,79 @@ function App() {
               </li>
             ))}
           </ol>
-        </div>
-      </section>
+        </section>
+      </div>
+    </div>
+  )
+}
 
-      <section id="about" className="about">
-        <div className="about-inner">
-          <h2>What is WIM?</h2>
-          <p>
-            Water Intelligence Modeling is a framework that integrates water
-            data, engineering knowledge, environmental processes, and
-            governance into a single evolving knowledge model — aiming to
-            become for water what BIM became for buildings. WIM-Assistant is
-            its intelligence layer: it explains, interprets regulations, and
-            learns continuously. Questions it cannot yet answer are logged,
-            reviewed by domain experts, and folded back into the corpus.
-          </p>
-          <ol className="layers" aria-label="The seven layers of WIM">
-            {LAYERS.map((l, i) => (
-              <li key={l} style={{ '--i': i }}>
-                <span className="layer-bar" />
-                {l}
-              </li>
+// ------------------------------------------------------------
+// App shell with tabs (hash-synced, panels stay mounted)
+// ------------------------------------------------------------
+function App() {
+  const initial = TABS.some((t) => t.id === window.location.hash.slice(1))
+    ? window.location.hash.slice(1)
+    : 'ask'
+  const [tab, setTab] = useState(initial)
+
+  useEffect(() => {
+    const onHash = () => {
+      const h = window.location.hash.slice(1)
+      if (TABS.some((t) => t.id === h)) setTab(h)
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  function go(id) {
+    setTab(id)
+    history.replaceState(null, '', '#' + id)
+  }
+
+  return (
+    <div className="shell">
+      <nav className="topbar">
+        <div className="topbar-inner">
+          <span className="brand">
+            <StrataMark />
+            <span className="brand-name">WIM-Assistant</span>
+          </span>
+          <div className="tabs" role="tablist" aria-label="Sections">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={tab === t.id}
+                className={`tab${tab === t.id ? ' is-on' : ''}`}
+                onClick={() => go(t.id)}
+              >
+                {t.label}
+              </button>
             ))}
-          </ol>
+          </div>
         </div>
-      </section>
+      </nav>
+
+      <main className="content">
+        <div hidden={tab !== 'ask'}>
+          <Ask />
+        </div>
+        <div hidden={tab !== 'observatory'}>
+          <Observatory visible={tab === 'observatory'} />
+        </div>
+        <div hidden={tab !== 'about'}>
+          <About />
+        </div>
+      </main>
 
       <footer className="footer">
         <p>
-          A Water Intelligence Modeling initiative · Answers are generated from
-          a curated corpus and labelled by source tier. Policy and legal
-          content should always be verified against current official sources.
+          A Water Intelligence Modeling initiative · Answers come from a
+          curated corpus and are labelled by source tier · Live data from open
+          satellite and model feeds, not official warnings.
         </p>
       </footer>
-    </>
+    </div>
   )
 }
 
