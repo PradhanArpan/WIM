@@ -974,6 +974,7 @@ function App() {
   const [satDate, setSatDate] = useState(defaultSatDate())
   const [baseId, setBaseId] = useState('satellite')
   const [boundaries, setBoundaries] = useState(true)
+  const [geoMsg, setGeoMsg] = useState('')
   const [prefill, setPrefill] = useState(null)
   const { d, status } = useObservations(place)
 
@@ -992,9 +993,14 @@ function App() {
   }
 
   function locateMe() {
-    if (!navigator.geolocation) return
+    if (!navigator.geolocation) {
+      setGeoMsg('This browser does not support location.')
+      return
+    }
+    setGeoMsg('Locating…')
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        setGeoMsg('')
         setPlace({
           name: 'My location',
           region: '',
@@ -1003,8 +1009,17 @@ function App() {
           lon: +pos.coords.longitude.toFixed(4),
         })
       },
-      () => {},
-      { enableHighAccuracy: false, timeout: 8000 }
+      (err) => {
+        // 1 PERMISSION_DENIED, 2 POSITION_UNAVAILABLE, 3 TIMEOUT
+        var msg =
+          err.code === 1
+            ? 'Location permission blocked. Click the icon at the left of the address bar and allow location, then try again.'
+            : err.code === 2
+              ? 'Position unavailable. Check that location services are switched on for your device.'
+              : 'Location timed out. Try once more.'
+        setGeoMsg(msg)
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 }
     )
   }
 
@@ -1147,6 +1162,7 @@ function App() {
 
         <div className="statusbar">
           <div className="statusbar-inner">
+            {geoMsg && <span className="st-geo">{geoMsg}</span>}
             {place ? (
               <>
                 <span className="st-place">{place.name}</span>

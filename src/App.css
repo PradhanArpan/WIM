@@ -485,6 +485,11 @@
   color: var(--amber);
 }
 
+.st-geo {
+  color: var(--amber);
+  flex-basis: 100%;
+}
+
 .st-reading {
   animation: strata-pulse 1.2s ease-in-out infinite;
 }
