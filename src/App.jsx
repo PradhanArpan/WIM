@@ -94,6 +94,26 @@ const FEEDS = [
       e?.elevation?.[0] !== undefined ? { elevation: e.elevation[0] } : null,
   },
   {
+    id: 'india',
+    label: 'India — district data',
+    provider: 'data.gov.in via backend (Ministry of Jal Shakti, IMD)',
+    needsAdmin: true,
+    url: (p, admin) =>
+      BACKEND_URL +
+      '?action=india&state=' + encodeURIComponent(admin.state) +
+      '&district=' + encodeURIComponent(admin.district),
+    extract: (r) => {
+      if (!r || !r.available) return null
+      return {
+        in_district: [r.district, r.state].filter(Boolean).join(', '),
+        in_rain_year: r.in_rain_year,
+        in_rain_annual: r.in_rain_annual,
+        in_rain_monsoon: r.in_rain_monsoon,
+        in_rain_days: r.in_rain_days,
+      }
+    },
+  },
+  {
     id: 'climate',
     label: 'Climate outlook 2045',
     provider: 'CMIP6 downscaled via Open-Meteo',
@@ -133,6 +153,16 @@ const METRIC_GROUPS = [
       { field: 'discharge30Max', label: '30-day forecast peak', unit: 'm³/s', digits: 1 },
       { field: 'elevation', label: 'Elevation', unit: 'm', digits: 0 },
       { field: 'tmax', label: 'Max / min today', unit: '°C', digits: 0, pair: 'tmin' },
+    ],
+  },
+  {
+    title: 'India — district records',
+    requires: 'in_district',
+    metrics: [
+      { field: 'in_district', label: 'District', text: true },
+      { field: 'in_rain_annual', label: 'Annual rainfall (IMD gridded)', unit: 'mm', digits: 0 },
+      { field: 'in_rain_monsoon', label: 'Monsoon Jun–Sep', unit: 'mm', digits: 0 },
+      { field: 'in_rain_year', label: 'Reference year', text: true },
     ],
   },
   {
@@ -350,12 +380,67 @@ function useObservations(place) {
     setD(null)
     setStatus(Object.fromEntries(FEEDS.map((f) => [f.id, 'loading'])))
 
+    // Reverse geocoding runs in the browser on purpose: each visitor
+    // uses their own IP. Server-side calls from Apps Script share a
+    // Google IP pool, which BigDataCloud bans and Nominatim
+    // rate-limits. Both were tried; both failed for that reason.
+    const resolveAdmin = async () => {
+      try {
+        const r = await fetch(
+          'https://api.bigdatacloud.net/data/reverse-geocode-client' +
+            `?latitude=${place.lat}&longitude=${place.lon}&localityLanguage=en`
+        )
+        const g = await r.json()
+        const admins = (g && g.localityInfo && g.localityInfo.administrative) || []
+        let district = ''
+        admins.forEach((a) => {
+          const nm = String(a.name || '')
+          if (!district && /district|zilla|zila/i.test(nm)) {
+            district = nm.replace(/\s*(district|zilla|zila)\s*/i, '').trim()
+          }
+        })
+        if (!district) {
+          let deepest = null
+          admins.forEach((a) => {
+            if (a.adminLevel >= 5 && (!deepest || a.adminLevel > deepest.adminLevel)) {
+              deepest = a
+            }
+          })
+          district = deepest ? deepest.name : (g && (g.city || g.locality)) || ''
+        }
+        return {
+          countryCode: (g && g.countryCode) || '',
+          state: (g && g.principalSubdivision) || '',
+          district: district,
+        }
+      } catch {
+        return null
+      }
+    }
+
     const merged = {}
+    const adminPromise = FEEDS.some((f) => f.needsAdmin)
+      ? resolveAdmin()
+      : Promise.resolve(null)
+
     FEEDS.forEach((feed) => {
-      fetch(feed.url(place))
-        .then((r) => r.json())
+      // Feeds needing administrative context wait for the lookup and
+      // switch off cleanly outside India; the rest start immediately.
+      const run = feed.needsAdmin
+        ? adminPromise.then((admin) => {
+            if (id !== reqId.current) return null
+            if (!admin || admin.countryCode !== 'IN' || !admin.state) {
+              setStatus((s) => ({ ...s, [feed.id]: 'off' }))
+              return null
+            }
+            return fetch(feed.url(place, admin))
+          })
+        : fetch(feed.url(place))
+
+      Promise.resolve(run)
+        .then((r) => (r ? r.json() : null))
         .then((raw) => {
-          if (id !== reqId.current) return
+          if (id !== reqId.current || raw === null) return
           const out = feed.extract(raw)
           if (out) {
             Object.assign(merged, out)
@@ -1208,19 +1293,29 @@ function App() {
 
             {place && weatherOk && d && (
               <>
-                {METRIC_GROUPS.map((g) => (
+                {METRIC_GROUPS.filter(
+                  (g) => !g.requires || d[g.requires]
+                ).map((g) => (
                   <div key={g.title}>
                     <h2 className="group-head">{g.title}</h2>
                     <div className="metrics">
                       {g.metrics.map((m) => (
                         <div key={m.field} className="metric">
-                          <span className="metric-value">
-                            {fmt(d[m.field], m.digits)}
-                            {m.pair ? (
-                              <span className="metric-sub"> / {fmt(d[m.pair], m.digits)}°</span>
-                            ) : (
-                              <em>{m.unit}</em>
-                            )}
+                          <span
+                            className={`metric-value${m.text ? ' is-text' : ''}`}
+                          >
+                            {m.text
+                              ? d[m.field] || '—'
+                              : fmt(d[m.field], m.digits)}
+                            {!m.text &&
+                              (m.pair ? (
+                                <span className="metric-sub">
+                                  {' '}
+                                  / {fmt(d[m.pair], m.digits)}°
+                                </span>
+                              ) : (
+                                <em>{m.unit}</em>
+                              ))}
                           </span>
                           <span className="metric-label">{m.label}</span>
                         </div>
