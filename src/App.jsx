@@ -287,17 +287,26 @@ function StrataMark({ size = 22 }) {
   )
 }
 
-function UtcClock() {
+function Clock() {
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000)
     return () => clearInterval(t)
   }, [])
   const p = (n) => String(n).padStart(2, '0')
+
+  // UTC is the reference used by satellite and model timestamps;
+  // IST is shown alongside for local reading.
+  const utc = p(now.getUTCHours()) + ':' + p(now.getUTCMinutes())
+  const istMs = now.getTime() + (5.5 * 60 + now.getTimezoneOffset()) * 60000
+  const ist = new Date(istMs)
+  const local = p(ist.getHours()) + ':' + p(ist.getMinutes())
+
   return (
-    <span className="utc-clock" aria-label="Coordinated universal time">
-      {p(now.getUTCHours())}:{p(now.getUTCMinutes())}:{p(now.getUTCSeconds())}{' '}
-      UTC
+    <span className="clock" aria-label="Current time, UTC and India Standard Time">
+      <span className="clock-utc">{utc}<em>UTC</em></span>
+      <span className="clock-sep" aria-hidden="true">·</span>
+      <span className="clock-ist">{local}<em>IST</em></span>
     </span>
   )
 }
@@ -981,7 +990,7 @@ function App() {
               <span className="brand-sub">Water Intelligence Modeling</span>
             </span>
           </span>
-          <UtcClock />
+          <Clock />
           <nav className="chrome-nav">
             <span
               className={`feed-summary ${

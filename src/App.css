@@ -70,13 +70,36 @@
   flex-shrink: 0;
 }
 
-.utc-clock {
+.clock {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
   font-family: var(--font-mono);
   font-weight: 500;
   font-size: 0.82rem;
-  letter-spacing: 0.08em;
-  color: var(--amber);
+  letter-spacing: 0.06em;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.clock-utc {
+  color: var(--amber);
+}
+
+.clock-ist {
+  color: var(--chrome-soft);
+}
+
+.clock em {
+  font-style: normal;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  margin-left: 0.22rem;
+  opacity: 0.75;
+}
+
+.clock-sep {
+  color: var(--chrome-line);
 }
 
 .chrome-nav {
@@ -1271,7 +1294,8 @@
 
 @media (max-width: 640px) {
   .brand-sub,
-  .utc-clock {
+  .clock-ist,
+  .clock-sep {
     display: none;
   }
 
