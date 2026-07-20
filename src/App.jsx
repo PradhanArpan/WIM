@@ -688,21 +688,22 @@ function Console({ prefill }) {
   return (
     <aside className="console" aria-label="Ask the corpus">
       <header className="panel-head">
-        <span className="panel-title">Reference desk</span>
+        <span className="panel-title">WIM-Assistant</span>
         <span className="panel-note">EN · हिंदी · ಕನ್ನಡ</span>
       </header>
 
       <div className="console-body">
         <p className="console-hint">
-          Ask anything about water — fundamentals, engineering, governance.
-          Answers come from a curated corpus and carry a source tier.
+          Ask anything related to water resources fundamentals, engineering,
+          and governance. Answers come from a curated corpus and carry a
+          source tier.
         </p>
 
         <div className="console-input">
           <input
             type="text"
             value={question}
-            placeholder="Ask a water question…"
+            placeholder="Ask a question…"
             aria-label="Your question"
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && ask()}
@@ -729,9 +730,9 @@ function Console({ prefill }) {
 
         {SR && (
           <div className="voice-row">
-            <span className="voice-label">
-              {listening ? 'Listening — speak now' : 'Voice'}
-            </span>
+            {listening && (
+              <span className="voice-label">Listening — speak now</span>
+            )}
             <div className="voice-langs" role="group" aria-label="Voice language">
               {VOICE_LANGS.map((v) => (
                 <button
@@ -805,8 +806,7 @@ function About() {
           <p className="about-text">
             Water Intelligence Modeling is a framework that integrates water
             data, engineering knowledge, environmental processes, and
-            governance into a single evolving knowledge model — aiming to
-            become for water what BIM became for buildings. WIM-Assistant is
+            governance into a single evolving knowledge model. WIM-Assistant is
             its intelligence layer: it explains, interprets regulations, and
             learns continuously. Questions it cannot yet answer are logged,
             reviewed by domain experts, and folded back into the corpus.
@@ -879,6 +879,23 @@ function App() {
   function go(v) {
     setView(v)
     history.replaceState(null, '', v === 'about' ? '#about' : '#')
+  }
+
+  function locateMe() {
+    if (!navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setPlace({
+          name: 'My location',
+          region: '',
+          country: '',
+          lat: +pos.coords.latitude.toFixed(4),
+          lon: +pos.coords.longitude.toFixed(4),
+        })
+      },
+      () => {},
+      { enableHighAccuracy: false, timeout: 8000 }
+    )
   }
 
   function askAbout(p) {
@@ -955,6 +972,19 @@ function App() {
                 </button>
               ))}
             </div>
+            <button
+              className="locate-btn"
+              onClick={locateMe}
+              title="Use my current location"
+              aria-label="Use my current location"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm9.2 3.1h-1.66a7.55 7.55 0 0 0-6.64-6.64V2.8a.9.9 0 0 0-1.8 0v1.66a7.55 7.55 0 0 0-6.64 6.64H2.8a.9.9 0 0 0 0 1.8h1.66a7.55 7.55 0 0 0 6.64 6.64v1.66a.9.9 0 0 0 1.8 0v-1.66a7.55 7.55 0 0 0 6.64-6.64h1.66a.9.9 0 0 0 0-1.8ZM12 17.75A5.75 5.75 0 1 1 17.75 12 5.76 5.76 0 0 1 12 17.75Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </button>
             {satId !== 'none' && (
               <div className="sat-date">
                 <button onClick={() => setSatDate((v) => shiftDate(v, -1))} aria-label="Previous day">

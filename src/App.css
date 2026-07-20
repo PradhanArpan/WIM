@@ -279,6 +279,26 @@
   font-weight: 600;
 }
 
+.locate-btn {
+  border: 1px solid var(--chrome-line);
+  background: transparent;
+  color: var(--chrome-soft);
+  border-radius: 999px;
+  width: 2.1rem;
+  height: 2.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin-left: auto;
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.locate-btn:hover {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
 .sat-date {
   display: inline-flex;
   align-items: center;
@@ -286,7 +306,6 @@
   border: 1px solid var(--chrome-line);
   border-radius: 999px;
   padding: 0.08rem 0.15rem;
-  margin-left: auto;
 }
 
 .sat-date span {
