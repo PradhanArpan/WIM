@@ -1040,6 +1040,35 @@
   white-space: pre-wrap;
 }
 
+.speak-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.8rem;
+  border: 1px solid var(--hairline);
+  background: var(--paper);
+  color: var(--ink-soft);
+  border-radius: 999px;
+  padding: 0.34rem 0.8rem;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+}
+
+.speak-btn:hover {
+  border-color: var(--amber);
+  color: var(--amber-strong);
+  background: var(--amber-wash);
+}
+
+.speak-btn.is-speaking {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: #14100a;
+  font-weight: 600;
+}
+
 .answer-source {
   margin: 0.8rem 0 0;
   padding-top: 0.7rem;

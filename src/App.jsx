@@ -7,11 +7,41 @@ import './App.css'
 // (Deploy > New deployment > Web app > copy the /exec URL)
 const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbyUyZqGshX-MmaaUBvFk6dSSGlEKaxhtPc-rtRXW_m1W0uqdmgFnGcYfOUyaT5hhFhLkA/exec'
 
-// Published Google Earth Engine App (free, no key, public).
-// Source script lives in the GEE Code Editor; republish there to
-// update. Swap this URL to point at a different published app.
-const GEE_APP_URL =
-  'https://evocative-fort-427508-j2.projects.earthengine.app/view/wim'
+// ============================================================
+// ANALYSIS TOOLS — published Google Earth Engine apps
+// Each tool is one entry. To add another: publish the script in the
+// GEE Code Editor (Apps > NEW APP > public), then add an object
+// here with its URL. A tool with url: null renders as a "not yet
+// published" card instead of a broken frame, so entries can be
+// added before the app exists.
+// ============================================================
+const GEE_TOOLS = [
+  {
+    id: 'waterbody',
+    label: 'Water body time series',
+    url: 'https://evocative-fort-427508-j2.projects.earthengine.app/view/wim',
+    blurb:
+      'Click on or near any water body. Its outline is taken from the JRC ' +
+      'surface water record, then monthly water spread area is computed ' +
+      'from Sentinel-2 imagery. Click several bodies to compare them on ' +
+      'one chart, and export the series as CSV.',
+    method:
+      'Sentinel-2 MNDWI, cloud-masked, monthly median. Extent delineated ' +
+      'from JRC Global Surface Water 1984-2021.',
+  },
+  {
+    id: 'beforeafter',
+    label: 'Before / after by year',
+    url: null,
+    blurb:
+      'Two linked maps with a wipe handle: set a year on each side and ' +
+      'drag across a tank to see how it has changed. A filmstrip shows ' +
+      'every year as a thumbnail, with water area per year alongside.',
+    method:
+      'Annual Sentinel-2 median composites, season-matched so like is ' +
+      'compared with like.',
+  },
+]
 
 // ============================================================
 // DATA-FEED REGISTRY
@@ -771,6 +801,46 @@ function RainChart({ dates, rain, past7, next7 }) {
 }
 
 // ------------------------------------------------------------
+// SPEECH OUTPUT
+// Script-based detection: Devanagari, Kannada and Latin ranges do
+// not overlap, so this is deterministic and needs no model.
+// Known limit: romanised input ("paani kitna hai") reads as
+// English, which is common on Indian phone keyboards.
+//
+// The provider is deliberately behind one function. Browser speech
+// synthesis works today with no key or backend. To move to
+// Bhashini later, replace the body of speak() with a call to the
+// backend proxy; nothing else in the component changes.
+// ------------------------------------------------------------
+const DEVANAGARI = /[\u0900-\u097F]/g
+const KANNADA = /[\u0C80-\u0CFF]/g
+const LATIN = /[A-Za-z]/g
+
+function detectLang(text) {
+  const counts = {
+    'hi-IN': (text.match(DEVANAGARI) || []).length,
+    'kn-IN': (text.match(KANNADA) || []).length,
+    'en-IN': (text.match(LATIN) || []).length,
+  }
+  const best = Object.keys(counts).reduce((a, b) =>
+    counts[a] >= counts[b] ? a : b
+  )
+  return counts[best] ? best : 'en-IN'
+}
+
+function pickVoice(lang) {
+  const voices = window.speechSynthesis?.getVoices() || []
+  if (!voices.length) return null
+  // exact locale, then language family, then any Indian English
+  return (
+    voices.find((v) => v.lang === lang) ||
+    voices.find((v) => v.lang.startsWith(lang.split('-')[0])) ||
+    voices.find((v) => v.lang === 'en-IN') ||
+    null
+  )
+}
+
+// ------------------------------------------------------------
 // Reference desk — the assistant, docked as a console panel
 // ------------------------------------------------------------
 function Console({ prefill }) {
@@ -780,7 +850,42 @@ function Console({ prefill }) {
   const [loading, setLoading] = useState(false)
   const [listening, setListening] = useState(false)
   const [voiceLang, setVoiceLang] = useState('en-IN')
+  const [speaking, setSpeaking] = useState(false)
+  const [canSpeak, setCanSpeak] = useState(false)
   const recRef = useRef(null)
+
+  // Voices load asynchronously in most browsers.
+  useEffect(() => {
+    const synth = window.speechSynthesis
+    if (!synth) return
+    const check = () => setCanSpeak((synth.getVoices() || []).length > 0)
+    check()
+    synth.addEventListener?.('voiceschanged', check)
+    return () => {
+      synth.removeEventListener?.('voiceschanged', check)
+      synth.cancel()
+    }
+  }, [])
+
+  function speak(text) {
+    const synth = window.speechSynthesis
+    if (!synth || !text) return
+    if (speaking) {
+      synth.cancel()
+      setSpeaking(false)
+      return
+    }
+    const lang = detectLang(text)
+    const u = new SpeechSynthesisUtterance(text)
+    u.lang = lang
+    const v = pickVoice(lang)
+    if (v) u.voice = v
+    u.rate = 0.95
+    u.onend = () => setSpeaking(false)
+    u.onerror = () => setSpeaking(false)
+    setSpeaking(true)
+    synth.speak(u)
+  }
 
   const SR =
     typeof window !== 'undefined' &&
@@ -940,6 +1045,25 @@ function Console({ prefill }) {
               )}
             </div>
             <p className="answer-text">{result.answer}</p>
+            {canSpeak && (
+              <button
+                className={`speak-btn${speaking ? ' is-speaking' : ''}`}
+                onClick={() => speak(result.answer)}
+                aria-label={speaking ? 'Stop reading' : 'Read this answer aloud'}
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                  {speaking ? (
+                    <path d="M7 6h3.5v12H7zm6.5 0H17v12h-3.5z" fill="currentColor" />
+                  ) : (
+                    <path
+                      d="M4 9.5h3.2L12 5.3v13.4L7.2 14.5H4zM15.5 9a3.6 3.6 0 0 1 0 6 .9.9 0 0 1-.7-1.6 1.8 1.8 0 0 0 0-2.8.9.9 0 0 1 .7-1.6Zm1.4-3a7 7 0 0 1 0 12 .9.9 0 1 1-.8-1.6 5.2 5.2 0 0 0 0-8.8.9.9 0 0 1 .8-1.6Z"
+                      fill="currentColor"
+                    />
+                  )}
+                </svg>
+                {speaking ? 'Stop' : 'Listen'}
+              </button>
+            )}
             {result.source && (
               <p className="answer-source">Source: {result.source}</p>
             )}
@@ -1016,37 +1140,73 @@ function About() {
 // published Earth Engine App.
 // ------------------------------------------------------------
 function Analysis() {
+  const [toolId, setToolId] = useState(GEE_TOOLS[0].id)
+  const tool = GEE_TOOLS.find((t) => t.id === toolId) || GEE_TOOLS[0]
+
   return (
     <div className="analysis">
       <div className="analysis-bar">
         <div className="analysis-bar-inner">
           <span className="rail-label">Engineering models · Earth Engine</span>
-          <p className="analysis-note">
-            Click any point to compute monthly surface water area from
-            Sentinel-2 imagery (MNDWI), with the JRC 1984&ndash;2021 baseline.
-            Charts can be downloaded as CSV.
-          </p>
-          <a
-            className="analysis-open"
-            href={GEE_APP_URL}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Open full screen &nearr;
-          </a>
+          <div className="tool-tabs" role="tablist" aria-label="Analysis tools">
+            {GEE_TOOLS.map((t) => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={toolId === t.id}
+                className={`tool-tab${toolId === t.id ? ' is-on' : ''}${
+                  t.url ? '' : ' is-pending'
+                }`}
+                onClick={() => setToolId(t.id)}
+              >
+                {t.label}
+                {!t.url && <em>soon</em>}
+              </button>
+            ))}
+          </div>
+          {tool.url && (
+            <a
+              className="analysis-open"
+              href={tool.url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open full screen &nearr;
+            </a>
+          )}
         </div>
       </div>
-      <iframe
-        className="analysis-frame"
-        src={GEE_APP_URL}
-        title="WIM Surface Water Explorer, powered by Google Earth Engine"
-        loading="lazy"
-      />
+
+      <p className="analysis-note">{tool.blurb}</p>
+
+      {tool.url ? (
+        <iframe
+          key={tool.id}
+          className="analysis-frame"
+          src={tool.url}
+          title={tool.label + ', powered by Google Earth Engine'}
+          loading="lazy"
+        />
+      ) : (
+        <div className="analysis-pending">
+          <StrataMark size={30} />
+          <div>
+            <h3>Not published yet</h3>
+            <p>
+              This tool exists as an Earth Engine script but has not been
+              published as a public app. Once it is, it will appear here.
+            </p>
+          </div>
+        </div>
+      )}
+
       <p className="analysis-credit">
-        Analysis runs on Google Earth Engine using Copernicus Sentinel-2 data
-        and the JRC Global Surface Water dataset. Water extent is derived by
-        index thresholding and should be validated against ground
-        observations before use in decisions.
+        <strong>Method.</strong> {tool.method} Analysis runs on Google Earth
+        Engine using Copernicus Sentinel-2 data and the JRC Global Surface
+        Water dataset. Water extent is derived by index thresholding and
+        should be validated against ground observations before use in
+        decisions. Months without cloud-free imagery are omitted rather than
+        recorded as zero.
       </p>
     </div>
   )
