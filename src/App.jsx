@@ -1229,6 +1229,38 @@ function App() {
   const [baseId, setBaseId] = useState('satellite')
   const [boundaries, setBoundaries] = useState(true)
   const [geoMsg, setGeoMsg] = useState('')
+  const [showOsm, setShowOsm] = useState(false)
+  const [osm, setOsm] = useState(null)
+  const [osmBusy, setOsmBusy] = useState(false)
+
+  // Physical systems load on demand: the Overpass query is heavy and
+  // most visitors will not need it.
+  useEffect(() => {
+    if (!showOsm || !place) {
+      setOsm(null)
+      return
+    }
+    let cancelled = false
+    setOsmBusy(true)
+    fetch(OVERPASS_URL, {
+      method: 'POST',
+      body: overpassQuery(place.lat, place.lon, OSM_RADIUS_M),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return
+        setOsm({ groups: classifyOsm(d.elements) })
+      })
+      .catch(() => {
+        if (!cancelled) setOsm({ groups: null, failed: true })
+      })
+      .finally(() => {
+        if (!cancelled) setOsmBusy(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [showOsm, place])
   const [prefill, setPrefill] = useState(null)
   const { d, status } = useObservations(place)
 
@@ -1369,6 +1401,15 @@ function App() {
             </div>
 
             <button
+              className={`bound-btn${showOsm ? ' is-on' : ''}`}
+              onClick={() => setShowOsm((v) => !v)}
+              title="Rivers, tanks, dams and wells from OpenStreetMap"
+              aria-pressed={showOsm}
+            >
+              {osmBusy ? 'Loading…' : 'Water systems'}
+            </button>
+
+            <button
               className={`bound-btn${boundaries ? ' is-on' : ''}`}
               onClick={() => setBoundaries((v) => !v)}
               title="Country, state and district boundaries"
@@ -1412,6 +1453,7 @@ function App() {
           visible={view === 'observatory'}
           baseId={baseId}
           boundaries={boundaries}
+          osm={osm}
         />
 
         <div className="statusbar">
@@ -1458,6 +1500,46 @@ function App() {
                 The weather feed could not read this point. Try another point
                 or retry in a moment.
               </p>
+            )}
+
+            {place && showOsm && osm && (
+              <div>
+                <h2 className="group-head">
+                  Physical systems · OpenStreetMap
+                </h2>
+                {osm.failed ? (
+                  <p className="live-status">
+                    Could not reach OpenStreetMap. Try again shortly.
+                  </p>
+                ) : (
+                  <>
+                    <div className="metrics">
+                      {Object.entries(osm.groups).map(([k, g]) => (
+                        <div key={k} className="metric">
+                          <span className="metric-value">
+                            {g.items.length}
+                            <em>within 3 km</em>
+                          </span>
+                          <span className="metric-label">
+                            <i
+                              className="osm-key"
+                              style={{ background: g.colour }}
+                              aria-hidden="true"
+                            />
+                            {g.label}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="group-note">
+                      Mapped by OpenStreetMap contributors, so coverage is
+                      uneven: a tank missing here is unmapped, not
+                      necessarily absent on the ground. Named features show
+                      their name on hover.
+                    </p>
+                  </>
+                )}
+              </div>
             )}
 
             {place && weatherOk && d && (

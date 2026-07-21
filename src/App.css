@@ -624,6 +624,15 @@
   color: var(--ink-faint);
 }
 
+.osm-key {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 0.4rem;
+  vertical-align: 0;
+}
+
 .metric-label {
   font-size: 0.74rem;
   font-weight: 600;
@@ -1616,7 +1625,16 @@
     font-size: 1.15rem;
   }
 
-  .metric-label {
+  .osm-key {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 0.4rem;
+  vertical-align: 0;
+}
+
+.metric-label {
     font-size: 0.7rem;
   }
 
