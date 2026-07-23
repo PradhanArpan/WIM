@@ -1261,8 +1261,40 @@ function App() {
   const [baseId, setBaseId] = useState('satellite')
   const [boundaries, setBoundaries] = useState(true)
   const [geoMsg, setGeoMsg] = useState('')
+  const [showOsm, setShowOsm] = useState(false)
+  const [osm, setOsm] = useState(null)
+  const [osmBusy, setOsmBusy] = useState(false)
   const [prefill, setPrefill] = useState(null)
   const { d, status } = useObservations(place)
+
+  // Physical systems load on demand: the Overpass query is heavy and
+  // most visitors will not need it.
+  useEffect(() => {
+    if (!showOsm || !place) {
+      setOsm(null)
+      return
+    }
+    let cancelled = false
+    setOsmBusy(true)
+    fetch(OVERPASS_URL, {
+      method: 'POST',
+      body: overpassQuery(place.lat, place.lon, OSM_RADIUS_M),
+    })
+      .then((r) => r.json())
+      .then((d2) => {
+        if (cancelled) return
+        setOsm({ groups: classifyOsm(d2.elements) })
+      })
+      .catch(() => {
+        if (!cancelled) setOsm({ groups: null, failed: true })
+      })
+      .finally(() => {
+        if (!cancelled) setOsmBusy(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [showOsm, place])
 
   useEffect(() => {
     const onHash = () => {
@@ -1399,6 +1431,15 @@ function App() {
                 </button>
               ))}
             </div>
+
+            <button
+              className={`bound-btn${showOsm ? ' is-on' : ''}`}
+              onClick={() => setShowOsm((v) => !v)}
+              title="Rivers, tanks, dams and wells from OpenStreetMap"
+              aria-pressed={showOsm}
+            >
+              {osmBusy ? 'Loading…' : 'Water systems'}
+            </button>
 
             <button
               className={`bound-btn${boundaries ? ' is-on' : ''}`}
