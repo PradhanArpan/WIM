@@ -490,6 +490,24 @@
   flex-basis: 100%;
 }
 
+.rail-label {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--chrome-soft);
+  white-space: nowrap;
+}
+
+.st-osm {
+  color: var(--s2);
+}
+
+.st-where {
+  color: var(--chrome-soft);
+}
+
 .st-reading {
   animation: strata-pulse 1.2s ease-in-out infinite;
 }

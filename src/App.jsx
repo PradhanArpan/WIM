@@ -271,6 +271,44 @@ const BASE_MAPS = [
   },
 ]
 
+// ============================================================
+// PHYSICAL SYSTEMS — OpenStreetMap water infrastructure
+// Coverage is community-maintained and uneven: a tank absent here
+// is unmapped, not necessarily absent on the ground.
+// ============================================================
+const OVERPASS_URL = 'https://overpass-api.de/api/interpreter'
+const OSM_RADIUS_M = 3000
+
+function overpassQuery(lat, lon, r) {
+  return `[out:json][timeout:25];
+(
+  way["waterway"~"^(river|stream|canal|drain)$"](around:${r},${lat},${lon});
+  way["natural"="water"](around:${r},${lat},${lon});
+  way["landuse"="reservoir"](around:${r},${lat},${lon});
+  way["waterway"="dam"](around:${r},${lat},${lon});
+  node["man_made"~"^(water_well|water_tower|water_works)$"](around:${r},${lat},${lon});
+  node["amenity"="drinking_water"](around:${r},${lat},${lon});
+);
+out geom 400;`
+}
+
+function classifyOsm(elements) {
+  const groups = {
+    channels: { label: 'Rivers, canals and drains', items: [], colour: '#3e9db8' },
+    bodies: { label: 'Tanks, lakes and reservoirs', items: [], colour: '#0e5f7a' },
+    structures: { label: 'Dams and weirs', items: [], colour: '#b96e1f' },
+    points: { label: 'Wells, towers and supply points', items: [], colour: '#a05d14' },
+  }
+  ;(elements || []).forEach((el) => {
+    const t = el.tags || {}
+    if (t.waterway === 'dam') groups.structures.items.push(el)
+    else if (t.waterway) groups.channels.items.push(el)
+    else if (t.natural === 'water' || t.landuse === 'reservoir') groups.bodies.items.push(el)
+    else groups.points.items.push(el)
+  })
+  return groups
+}
+
 // Country, state and district boundaries with place names.
 const BOUNDARY_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'
@@ -656,13 +694,14 @@ function PlaceSearch({ onPick }) {
 // ------------------------------------------------------------
 // The world map. Click any point to read it.
 // ------------------------------------------------------------
-function WorldMap({ place, onPick, satId, satDate, visible, baseId, boundaries }) {
+function WorldMap({ place, onPick, satId, satDate, visible, baseId, boundaries, osm }) {
   const elRef = useRef(null)
   const mapRef = useRef(null)
   const markerRef = useRef(null)
   const overlayRef = useRef(null)
   const baseRef = useRef(null)
   const boundRef = useRef(null)
+  const osmRef = useRef(null)
 
   useEffect(() => {
     if (mapRef.current || !elRef.current) return
@@ -748,6 +787,39 @@ function WorldMap({ place, onPick, satId, satDate, visible, baseId, boundaries }
     wms.addTo(map)
     overlayRef.current = wms
   }, [satId, satDate])
+
+  // physical systems drawn above imagery, below the marker
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    if (osmRef.current) {
+      map.removeLayer(osmRef.current)
+      osmRef.current = null
+    }
+    if (!osm || !osm.groups) return
+    const layer = L.layerGroup()
+    Object.values(osm.groups).forEach((g) => {
+      g.items.forEach((el) => {
+        if (el.type === 'node' && el.lat) {
+          L.circleMarker([el.lat, el.lon], {
+            radius: 4, color: g.colour, weight: 1.5,
+            fillColor: g.colour, fillOpacity: 0.7,
+          }).bindTooltip((el.tags && el.tags.name) || g.label).addTo(layer)
+        } else if (el.geometry && el.geometry.length > 1) {
+          const pts = el.geometry.map((pp) => [pp.lat, pp.lon])
+          const closed = pts.length > 2 &&
+            pts[0][0] === pts[pts.length - 1][0] &&
+            pts[0][1] === pts[pts.length - 1][1]
+          const shape = closed
+            ? L.polygon(pts, { color: g.colour, weight: 1.5, fillOpacity: 0.35 })
+            : L.polyline(pts, { color: g.colour, weight: 2.5, opacity: 0.85 })
+          shape.bindTooltip((el.tags && el.tags.name) || g.label).addTo(layer)
+        }
+      })
+    })
+    layer.addTo(map)
+    osmRef.current = layer
+  }, [osm])
 
   // marker follows the selected place
   useEffect(() => {
@@ -1485,6 +1557,7 @@ function App() {
           visible={view === 'observatory'}
           baseId={baseId}
           boundaries={boundaries}
+          osm={osm}
         />
 
         <div className="statusbar">
