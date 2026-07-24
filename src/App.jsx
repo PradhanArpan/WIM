@@ -313,39 +313,77 @@ function classifyOsm(elements) {
 const BOUNDARY_URL =
   'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'
 
+// ============================================================
+// SATELLITE LAYERS — NASA GIBS, served as WMS.
+// Free, keyless, NASA-hosted: no tile export, no storage, no
+// billing. Adding a layer is one object here.
+//
+// If a layer renders blank at every date, the GIBS identifier is
+// wrong or retired — check it against NASA Worldview rather than
+// assuming the map is broken.
+// ============================================================
 const SAT_LAYERS = [
-  { id: 'none', label: 'None', layer: null, legend: null },
   {
-    id: 'truecolor',
-    label: 'True colour',
-    layer: 'VIIRS_SNPP_CorrectedReflectance_TrueColor',
-    opacity: 1,
-    legend:
-      'VIIRS corrected reflectance — what the satellite sees. Cloud, sediment plumes, snow and flooding are visible directly. VIIRS images the whole planet each day without swath gaps.',
+    id: 'truecolor', label: 'True colour', group: 'Surface',
+    layer: 'VIIRS_SNPP_CorrectedReflectance_TrueColor', opacity: 1,
+    legend: 'VIIRS corrected reflectance — what the satellite sees on the ' +
+      'day. Cloud, sediment plumes, snow and flooding are visible directly.',
   },
   {
-    id: 'precip',
-    label: 'Precipitation',
-    layer: 'IMERG_Precipitation_Rate',
-    opacity: 0.75,
-    legend:
-      'GPM IMERG precipitation rate — half-hourly global rainfall from the satellite constellation. Blue is light, red is intense.',
+    id: 'precip', label: 'Precipitation', group: 'Water',
+    layer: 'IMERG_Precipitation_Rate', opacity: 0.75,
+    legend: 'GPM IMERG precipitation rate — half-hourly global rainfall ' +
+      'from the satellite constellation. Blue is light, red is intense.',
   },
   {
-    id: 'lst',
-    label: 'Land surface temp',
-    layer: 'MODIS_Aqua_Land_Surface_Temp_Day',
-    opacity: 0.75,
-    legend:
-      'MODIS daytime land surface temperature — the skin temperature of the ground, a strong proxy for drought and heat stress.',
+    id: 'soil', label: 'Soil moisture', group: 'Water',
+    layer: 'SMAP_L3_Passive_Day_Soil_Moisture', opacity: 0.8,
+    legend: 'SMAP passive soil moisture — water held in the top few ' +
+      'centimetres of soil. The bridge between rainfall and what a crop ' +
+      'actually receives.',
   },
   {
-    id: 'ndvi',
-    label: 'Vegetation',
-    layer: 'MODIS_Terra_NDVI_8Day',
-    opacity: 0.8,
-    legend:
-      'MODIS NDVI, 8-day composite — vegetation vigour. Green is dense growth; pale is sparse or stressed cover.',
+    id: 'snow', label: 'Snow cover', group: 'Water',
+    layer: 'MODIS_Terra_Snow_Cover', opacity: 0.8,
+    legend: 'MODIS snow cover — seasonal water storage. For Indian rivers ' +
+      'this is the Himalayan contribution that sustains dry-season flow.',
+  },
+  {
+    id: 'sst', label: 'Sea surface temp', group: 'Water',
+    layer: 'GHRSST_L4_MUR_Sea_Surface_Temperature', opacity: 0.8,
+    legend: 'Sea surface temperature — a driver of monsoon behaviour. ' +
+      'Arabian Sea and Bay of Bengal warmth shapes how much moisture ' +
+      'reaches the subcontinent.',
+  },
+  {
+    id: 'lst', label: 'Land surface temp', group: 'Climate',
+    layer: 'MODIS_Aqua_Land_Surface_Temp_Day', opacity: 0.75,
+    legend: 'MODIS daytime land surface temperature — the skin temperature ' +
+      'of the ground, a strong proxy for drought and heat stress.',
+  },
+  {
+    id: 'ndvi', label: 'Vegetation', group: 'Climate',
+    layer: 'MODIS_Terra_NDVI_8Day', opacity: 0.8,
+    legend: 'MODIS NDVI, 8-day composite — vegetation vigour. Green is ' +
+      'dense growth; pale is sparse or stressed cover.',
+  },
+  {
+    id: 'fires', label: 'Fires', group: 'Climate',
+    layer: 'MODIS_Combined_Thermal_Anomalies_All', opacity: 0.9,
+    legend: 'MODIS thermal anomalies — active fire detections. Dry-season ' +
+      'clusters often mark crop residue burning rather than wildfire.',
+  },
+  {
+    id: 'aerosol', label: 'Aerosol', group: 'Climate',
+    layer: 'MODIS_Combined_Value_Added_AOD', opacity: 0.75,
+    legend: 'Aerosol optical depth — dust, smoke and pollution in the air ' +
+      'column. High values over the Indo-Gangetic plain are seasonal.',
+  },
+  {
+    id: 'nightlights', label: 'Night lights', group: 'Human',
+    layer: 'VIIRS_SNPP_DayNightBand_ENCC', opacity: 0.9,
+    legend: 'VIIRS day/night band — settlement and activity at night, a ' +
+      'rough proxy for where water demand concentrates.',
   },
 ]
 
@@ -694,11 +732,11 @@ function PlaceSearch({ onPick }) {
 // ------------------------------------------------------------
 // The world map. Click any point to read it.
 // ------------------------------------------------------------
-function WorldMap({ place, onPick, satId, satDate, visible, baseId, boundaries, osm }) {
+function WorldMap({ place, onPick, satLayers, satDate, visible, baseId, boundaries, osm }) {
   const elRef = useRef(null)
   const mapRef = useRef(null)
   const markerRef = useRef(null)
-  const overlayRef = useRef(null)
+  const overlaysRef = useRef({})
   const baseRef = useRef(null)
   const boundRef = useRef(null)
   const osmRef = useRef(null)
@@ -764,29 +802,44 @@ function WorldMap({ place, onPick, satId, satDate, visible, baseId, boundaries, 
     boundRef.current = layer
   }, [boundaries])
 
-  // satellite overlay
+  // Satellite overlays — several at once, each with its own opacity.
+  // A layer already on the map only has its opacity updated, so moving
+  // a slider does not force a tile reload.
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
-    if (overlayRef.current) {
-      map.removeLayer(overlayRef.current)
-      overlayRef.current = null
-    }
-    const cfg = SAT_LAYERS.find((s) => s.id === satId)
-    if (!cfg || !cfg.layer) return
-    const wms = L.tileLayer.wms(GIBS_WMS, {
-      layers: cfg.layer,
-      format: 'image/png',
-      transparent: true,
-      version: '1.3.0',
-      time: satDate,
-      opacity: cfg.opacity ?? 0.8,
-      crossOrigin: true,
-      zIndex: 200,
+    const live = overlaysRef.current
+    const wanted = satLayers || {}
+
+    Object.keys(live).forEach((id) => {
+      if (!(id in wanted)) {
+        map.removeLayer(live[id])
+        delete live[id]
+      }
     })
-    wms.addTo(map)
-    overlayRef.current = wms
-  }, [satId, satDate])
+
+    Object.keys(wanted).forEach((id) => {
+      const cfg = SAT_LAYERS.find((x) => x.id === id)
+      if (!cfg || !cfg.layer) return
+      if (live[id]) {
+        live[id].setOpacity(wanted[id])
+        return
+      }
+      const order = SAT_LAYERS.findIndex((x) => x.id === id)
+      const wms = L.tileLayer.wms(GIBS_WMS, {
+        layers: cfg.layer,
+        format: 'image/png',
+        transparent: true,
+        version: '1.3.0',
+        time: satDate,
+        opacity: wanted[id],
+        crossOrigin: true,
+        zIndex: 200 + order,
+      })
+      wms.addTo(map)
+      live[id] = wms
+    })
+  }, [satLayers, satDate])
 
   // physical systems drawn above imagery, below the marker
   useEffect(() => {
@@ -1328,7 +1381,24 @@ function App() {
     return VIEWS.indexOf(h) !== -1 ? h : 'observatory'
   })
   const [place, setPlace] = useState(null)
-  const [satId, setSatId] = useState('truecolor')
+  // Active satellite layers as { id: opacity }. Presence means visible.
+  const [satLayers, setSatLayers] = useState({ truecolor: 1 })
+
+  function toggleSat(id) {
+    setSatLayers((prev) => {
+      const next = { ...prev }
+      if (id in next) delete next[id]
+      else {
+        const cfg = SAT_LAYERS.find((x) => x.id === id)
+        next[id] = cfg && cfg.opacity ? cfg.opacity : 0.8
+      }
+      return next
+    })
+  }
+
+  function setSatOpacity(id, v) {
+    setSatLayers((prev) => ({ ...prev, [id]: v }))
+  }
   const [satDate, setSatDate] = useState(defaultSatDate())
   const [baseId, setBaseId] = useState('satellite')
   const [boundaries, setBoundaries] = useState(true)
@@ -1424,7 +1494,7 @@ function App() {
       ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }
 
-  const sat = SAT_LAYERS.find((x) => x.id === satId)
+  const activeSats = SAT_LAYERS.filter((x) => x.id in satLayers)
   const whereParts = [place?.region, place?.country].filter(
     (x, i, arr) => Boolean(x) && x !== place?.name && arr.indexOf(x) === i
   )
@@ -1485,12 +1555,21 @@ function App() {
               {SAT_LAYERS.map((x) => (
                 <button
                   key={x.id}
-                  className={`sat-chip${satId === x.id ? ' is-on' : ''}`}
-                  onClick={() => setSatId(x.id)}
+                  className={`sat-chip${x.id in satLayers ? ' is-on' : ''}`}
+                  onClick={() => toggleSat(x.id)}
+                  aria-pressed={x.id in satLayers}
                 >
                   {x.label}
                 </button>
               ))}
+              {activeSats.length > 0 && (
+                <button
+                  className="sat-chip sat-clear"
+                  onClick={() => setSatLayers({})}
+                >
+                  Clear
+                </button>
+              )}
             </div>
             <div className="base-switch" role="group" aria-label="Base map">
               {BASE_MAPS.map((b) => (
@@ -1535,7 +1614,7 @@ function App() {
                 />
               </svg>
             </button>
-            {satId !== 'none' && (
+            {activeSats.length > 0 && (
               <div className="sat-date">
                 <button onClick={() => setSatDate((v) => shiftDate(v, -1))} aria-label="Previous day">
                   ‹
@@ -1549,10 +1628,46 @@ function App() {
           </div>
         </div>
 
+        {activeSats.length > 0 && (
+          <div className="layer-stack">
+            <div className="layer-stack-inner">
+              {activeSats.map((x) => (
+                <div key={x.id} className="layer-row">
+                  <span className="layer-name">
+                    {x.label}
+                    <em>{x.group}</em>
+                  </span>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1"
+                    step="0.05"
+                    value={satLayers[x.id]}
+                    onChange={(e) =>
+                      setSatOpacity(x.id, parseFloat(e.target.value))
+                    }
+                    aria-label={'Opacity of ' + x.label}
+                  />
+                  <span className="layer-pct">
+                    {Math.round(satLayers[x.id] * 100)}%
+                  </span>
+                  <button
+                    className="layer-off"
+                    onClick={() => toggleSat(x.id)}
+                    aria-label={'Turn off ' + x.label}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <WorldMap
           place={place}
           onPick={setPlace}
-          satId={satId}
+          satLayers={satLayers}
           satDate={satDate}
           visible={view === 'observatory'}
           baseId={baseId}
@@ -1597,7 +1712,11 @@ function App() {
             ) : (
               <span className="st-empty">
                 Click the map or search a place to read conditions ·{' '}
-                {sat && sat.layer ? sat.label + ' imagery, ' + prettyDate(satDate) : 'no imagery layer'}
+                {activeSats.length
+                  ? activeSats.map((x) => x.label).join(' + ') +
+                    ', ' +
+                    prettyDate(satDate)
+                  : 'no imagery layer'}
               </span>
             )}
           </div>
@@ -1605,6 +1724,23 @@ function App() {
 
         <div className="workbench">
           <section className="readout" aria-label="Live readout">
+            {activeSats.length > 0 && (
+              <div>
+                <h2 className="group-head">Satellite layers shown</h2>
+                <ul className="legend-list">
+                  {activeSats.map((x) => (
+                    <li key={x.id}>
+                      <strong>{x.label}</strong> {x.legend}
+                    </li>
+                  ))}
+                </ul>
+                <p className="group-note">
+                  NASA GIBS imagery for {prettyDate(satDate)}. Polar-orbiting
+                  satellites build each day from successive passes, so a
+                  region can be incomplete; step back a day if you hit a gap.
+                </p>
+              </div>
+            )}
             {!place && (
               <div className="ob-empty">
                 <StrataMark size={28} />

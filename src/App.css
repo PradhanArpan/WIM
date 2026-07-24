@@ -442,6 +442,45 @@
 }
 
 /* the map — full-bleed hero of the instrument */
+/* several layers at once: stack panel with opacity control */
+.layer-stack { background: var(--chrome); border-bottom: 1px solid var(--chrome-line); }
+.layer-stack-inner {
+  max-width: 1240px; margin: 0 auto; padding: 0.45rem 1.1rem;
+  display: flex; flex-wrap: wrap; gap: 0.35rem 1.4rem;
+}
+.layer-row {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--chrome-soft);
+}
+.layer-name { color: var(--chrome-ink); white-space: nowrap; }
+.layer-name em {
+  font-style: normal; font-size: 0.6rem; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--chrome-soft); margin-left: 0.4rem;
+}
+.layer-row input[type='range'] { width: 82px; accent-color: var(--amber); cursor: pointer; }
+.layer-pct {
+  min-width: 2.4rem; text-align: right; color: var(--amber);
+  font-variant-numeric: tabular-nums;
+}
+.layer-off {
+  border: none; background: transparent; color: var(--chrome-soft);
+  font-size: 1rem; line-height: 1; padding: 0.1rem 0.3rem;
+  border-radius: 4px; cursor: pointer;
+}
+.layer-off:hover { color: #e2777a; background: rgba(226, 119, 122, 0.12); }
+.sat-clear { border-style: dashed; }
+
+/* legends for the active layers */
+.legend-list {
+  list-style: none; margin: 0 0 0.8rem; padding: 0;
+  display: grid; gap: 0.5rem; max-width: 52rem;
+}
+.legend-list li {
+  font-size: 0.84rem; line-height: 1.55; color: var(--ink-soft);
+  padding-left: 0.8rem; border-left: 2px solid var(--hairline);
+}
+.legend-list strong { color: var(--ink); font-weight: 600; }
+
 .map {
   height: min(56vh, 560px);
   min-height: 320px;
@@ -1591,6 +1630,9 @@
   .sat-date {
     flex-shrink: 0;
   }
+
+  .layer-stack-inner { padding: 0.4rem 0.8rem; gap: 0.3rem 0.9rem; }
+  .layer-row input[type='range'] { width: 64px; }
 
   .sat-date {
     margin-left: 0;
